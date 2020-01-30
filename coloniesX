@@ -1,0 +1,463 @@
+using Cairo
+using Combinatorics
+# using Filesystem
+
+# win = Tk.Toplevel("Test", 500, 500)
+# c = Canvas(win)
+# pack(c, expand=true, fill="both")
+# ctx = getgc(c)
+# set_coords(ctx, 100, 100, 400, 400, 0, 100, 100, 0)
+
+const COLONY_X = 50
+const COLONY_Y = 50
+const COMMONWEALTH_X = 20
+const COMMONWEALTH_Y = 20
+const SCALE_FACTOR = 3
+
+colonyFileName = ""
+
+
+function create_save_dir(i::Int)
+    name = "colonies4j-$i"
+    if !isdir(name)
+        mkdir(name)
+    end
+    name
+end
+
+filedir = create_save_dir(rand(1:1000000))
+function make_filename()
+    return filedir * "/" * "colony4j-$(rand(1:1000000)).png"
+end
+
+function spiral_offsets(xsize::Int64,ysize::Int64,xoffset::Int64,yoffset::Int64)
+    result=[]
+
+    # start near the middle and spiral around!
+    push!(result,((xsize-1)/2)*xoffset,((ysize-1)/2)*yoffset)
+
+    c=[i for i=1:max(xsize,ysize)]
+    xsign=true
+    ysign=false
+    for i in c
+        # println("i=$i")
+        # println("xsign=$xsign")
+        # println("ysign=$ysign")
+        # for each i we do a set for x and a set for y
+    # set for x
+       for w=1:i
+           if xsign
+               push!(result,(COLONY_X,0))
+           else
+               push!(result,(-COLONY_X,0))
+           end
+       end
+       xsign=!xsign
+    # repeat for y
+        for w=1:i
+           if ysign
+               push!(result,(0,COLONY_Y))
+           else
+               push!(result,(0,-COLONY_Y))
+           end
+       end
+       ysign=!ysign
+    end
+    result
+end
+
+function get_normal_offsets(xsize::Int64,ysize::Int64,xoffset::Int64,yoffset::Int64)
+    result=Tuple{Int64,Int64}[]
+    for j=1:ysize-1
+        for i=1:xsize-1
+            push!(result,(xoffset,0))
+        end
+        push!(result,((xsize-1)*xoffset,yoffset))
+    end
+    result
+end
+
+function get_offsets(offset_type::String="normal",nb::Int64=COMMONWEALTH_X*COMMONWEALTH_Y)
+    if offset_type=="spiral"
+        spiral_offsets(COMMONWEALTH_X,COMMONWEALTH_Y)
+    elseif offset_type=="normal"
+        get_normal_offsets(COMMONWEALTH_X,COMMONWEALTH_Y,COLONY_X,COLONY_Y)
+    elseif offset_type=="random"
+        get_random_offsets(COMMONWEALTH_X,COMMONWEALTH_Y,COLONY_X,COLONY_Y,nb)
+    end
+end
+
+function get_random_offsets(xsize::Int64,ysize::Int64,xoffset::Int64,yoffset::Int64,nb::Int64)
+
+    xo::Array{Int64,1} = rand(0:xsize-1,nb)
+    yo::Array{Int64,1} = rand(0:ysize-1,nb)
+    [(first(t)*xoffset,last(t)*yoffset) for t in zip(xo,yo)]
+
+end
+
+# Returns a drawing context that has been initialized for the
+# Commonwealth
+function create_drawing_context(s::CairoSurface, x_pixels::Int64, y_pixels::Int64)
+  # Set up PNG painting surface
+  cctx = CairoContext(s)
+  # save in order to create a blank version that will be restored
+  Cairo.save(cctx)
+  set_source_rgb(cctx,0.8,0.8,0.8)
+  rectangle(cctx,0,0,x_pixels,y_pixels)
+  fill(cctx)
+  restore(cctx)
+  cctx
+end
+
+
+
+ROT90=[0 -1;1 0]
+ROT90_2=ROT90^2
+ROT90_3=ROT90^3
+MIRRV=[1 0;0 -1]
+MIRRH=[-1 0;0 1]
+MIRRXY=[-0.5 0.5; 0.5 -0.5]
+MIRRX_Y=[-0.5 -0.5;-0.5 -0.5]
+
+# always returns 1
+of = function un(x::Int64) return (1,x==0); end
+# always returns 0
+zf = function nyet(x::Int64) return (0,x==1); end
+# switches 1 to 0 or 0 to 1
+swf = function changer(x::Int64) return ((1-x),true); end
+# returns the same value as given
+saf = function meme(x::Int64) return (x,false); end
+
+
+function generate_state_filters(neighbors::Array{Int64,1}, range::UnitRange=1:-1)
+    println("Generating state filters for $neighbors...")
+    count::Integer = 0
+    patterns::Array{Dict{Int64,Function},1} = []
+  for i in indices(neighbors,1)
+    for z::Array{Int64,1} in combinations(neighbors,i)
+      b = setdiff(neighbors,z)
+      for j in indices(b,1)
+        for o::Array{Int64,1} in combinations(b,j)
+            # println("o is $(typeof(o))")
+          c::Array{Int64,1} = setdiff(b,o)
+        #   println("c is $(typeof(c))")
+          for k in indices(c,1)
+            for sa::Array{Int64,1} = combinations(c,k)
+                # println("sa is $(typeof(sa))")
+                count += 1
+                if start(range) > count
+                    continue
+                end
+
+              sw::Array{Int64,1} = setdiff(c,sa)
+            #   println("sw is $(typeof(sw))")
+
+              od = Dict{Int64,Function}(x=>of for x::Int64 in o)
+              zd = Dict{Int64,Function}(x=>zf for x::Int64 in z)
+              sad = Dict{Int64,Function}(x=>saf for x::Int64 in sa)
+              swd = Dict{Int64,Function}(x=>swf for x::Int64 in sw)
+              push!(patterns,merge(od,zd,sad,swd))
+              if count==last(range)
+                  return patterns
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  patterns
+end
+
+# Pairs are all the possible permutations of coordinate offsets
+# from the current, center pixel. e.g. "-1,0" means "current x - 1, current y"
+# Returns an array of all possible permutations -2 to +2
+# function generate_coord_pairs()
+#   pairs = []
+#   for p in permutations([-2 -1 0 1 2],2)
+#     # println("p=$p")
+#     push!(pairs,p)
+#   end
+#   push!(pairs,[-2,-2])
+#   push!(pairs,[-1,-1])
+#   push!(pairs,[0,0])
+#   push!(pairs,[1,1])
+#   push!(pairs,[2,2])
+#   pairs
+# end
+
+# Returns false if the mask has already been used, either as-is, rotated or reflected
+function ensure_unique_mask(maskDict, mask)
+  if haskey(maskDict,mask) return false
+  elseif haskey(maskDict,ROT90*mask) return false
+  elseif haskey(maskDict,ROT90_2*mask) return false
+  elseif haskey(maskDict,ROT90_3*mask) return false
+  elseif haskey(maskDict,MIRRV*mask) return false
+  elseif haskey(maskDict,MIRRH*mask) return false
+  elseif haskey(maskDict,MIRRV*MIRRH*mask) return false
+  end
+  true
+end
+
+#Returns an iterator of weighted masks for use in evaluating the current Commonwealth
+function generate_masks()
+  masks = []
+  pairs = generate_coord_pairs()
+  s=size(pairs,1)
+  println("Pairs has size $s")
+  # for i=4:size(pairs,1)
+  for i=4:5
+    println("Creating sets of $i pairs...")
+    create_save_dir(i)
+
+    # this takes too long to calculate
+    # consider using an iterator and generating a random number that must meet a threshold if the current iterator entry is to be accepted.
+    for coordset in permutations(pairs,i)
+      # println("With i=$i, coordset=$coordset");
+      # inter = [j for j in coordset]
+      # println("Inter = $inter")
+      a = hcat([j for j in coordset]...) # create a nx2 matrix from the set of points in coordset
+      # println("Base mask is $a")
+      push!(masks,hcat(a,(MIRRV*MIRRH)*a)) # concatenate the mask with its horiz. and vertical reflection
+      # println("Complete mask is $mask")
+    end
+  end
+  masks
+end
+
+# Returns a 2-D array of weight values, one for each member of a neighborhood
+function generate_weights()
+  [1 2 2 2 2 2 1;
+  1 2 4 4 4 2 1;
+  1 2 4 8 4 2 1;
+  1 2 4 0 4 2 1;
+  1 2 4 8 4 2 1;
+  1 2 4 8 4 2 1;
+  1 2 2 2 2 2 1]
+
+  # [1 3 2 7 2;
+  # 1 3 4 4 4;
+  # 1 2 8 5 4;
+  # 1 9 4 2 4;
+  # 1 2 2 2 1]
+
+end
+
+function initializeColony(xsize::Integer, ysize::Integer, blank::Bool=true)
+    c::Array{Tuple{Int64,Bool}}=reshape([(x::Int64,y::Bool) for x::Int64 in zeros(ysize,1) for y::Bool in falses(1,xsize)],(ysize,xsize))
+    #println("c=$c")
+    # c = zeros(xsize,ysize)
+    if !blank
+        # println(c[Int64(xsize/2-1), Int64(ysize/2-1)])
+        c[Integer(ysize/2)-1,Integer(xsize/2)-1]=(1,false)
+        c[Integer(ysize/2)-1,  Integer(xsize/2)]=(1,false)
+        c[Integer(ysize/2)-1,Integer(xsize/2)+1]=(1,false)
+        c[Integer(ysize/2)+1,Integer(xsize/2)-1]=(1,false)
+        c[Integer(ysize/2)+1,  Integer(xsize/2)]=(1,false)
+        c[Integer(ysize/2)+1,Integer(xsize/2)+1]=(1,false)
+        c[Integer(ysize/2),  Integer(xsize/2)-1]=(1,false)
+        c[Integer(ysize/2),  Integer(xsize/2)+1]=(1,false)
+    end
+    c
+end
+
+
+function draw_colony(colony::Array{Tuple{Int64,Bool},2}, cctx)
+    # println("Drawing colony $(size(colony))")
+    co_x=0
+    co_y=0
+    for co_y in indices(colony,1)
+      for co_x in indices(colony,2)
+          val, switched = colony[co_y,co_x]
+
+          if val==0
+            if switched
+                set_source_rgb(cctx,0.83, 0.83, 0.83)
+            else
+                # white
+                set_source_rgb(cctx,1, 1, 1)
+            end
+        else
+            if switched
+                set_source_rgb(cctx,0.46, 0.46, 0.46)
+            else
+                # black
+                set_source_rgb(cctx,0.16, 0.16, 0.16)
+            end
+        end
+        rectangle(cctx,co_x-1,co_y-1,1,1)
+        fill(cctx)
+    end
+    end
+end
+
+
+function calculate_colony(colony::Array{Tuple{Int64,Bool},2}, weights::Array{Int64,2}, filter::Dict{Int64,Function})
+    # println("weights=$weights")
+    weight_depth_x::Int64 = ((size(weights,2)-1)/2)+1
+    # println("weight_depth_x=$weight_depth_x")
+    weight_depth_y::Int64 = ((size(weights,1)-1)/2)+1
+
+    ysize::Int64 = size(colony,1)
+
+    xsize::Int64 = size(colony,2)
+
+    # create a blank target colony
+    new_colony::Array{Tuple{Int64,Bool},2} = initializeColony(xsize, ysize)
+
+    for co_y::Int64 in indices(colony,1)
+        for co_x::Int64 in indices(colony,2)
+        #   println("x=$co_x,y=$co_y")
+          slice_offset_y::UnitRange{Int64} = -min(co_y-1,weight_depth_y-1):min(ysize-co_y,weight_depth_y-1)
+        #   println("slice_offset_y=$slice_offset_y type is $(typeof(slice_offset_y))")
+          weight_slice_y::UnitRange{Int64} = weight_depth_y+minimum(slice_offset_y):weight_depth_y+maximum(slice_offset_y)
+        #   println("weight_slice_y=$weight_slice_y type is $(typeof(weight_slice_y))")
+          colony_slice_y::UnitRange{Int64} = co_y+minimum(slice_offset_y):co_y+maximum(slice_offset_y)
+        #   println("colony_slice_y=$colony_slice_y type is $(typeof(colony_slice_y))")
+
+          slice_offset_x::UnitRange{Int64} = -min(co_x-1,weight_depth_x-1):min(xsize-co_x,weight_depth_x-1)
+        #   println("slice_offset_x=$slice_offset_x type is $(typeof(slice_offset_x))")
+          weight_slice_x::UnitRange{Int64} = weight_depth_x+minimum(slice_offset_x):weight_depth_x+maximum(slice_offset_x)
+        #   println("weight_slice_x=$weight_slice_x type is $(typeof(weight_slice_x))")
+          colony_slice_x::UnitRange{Int64} = co_x+minimum(slice_offset_x):co_x+maximum(slice_offset_x)
+        #   println("colony_slice_x=$colony_slice_x type is $(typeof(colony_slice_x))")
+
+          weight_slice::Array{Int64,2} = view(weights, weight_slice_y, weight_slice_x)
+        #   println("weight_slice=$weight_slice")
+
+          neighborhood::Array{Int64,2} = [i[1] for i in view(colony, colony_slice_y, colony_slice_x)]
+        #   println("neighborhood=$neighborhood")
+
+          weighted_val::Int64 = sum(weight_slice.*neighborhood)
+        #    println("weighted_val=$weighted_val")
+          reduced_val::Int64 = round(sum(weight_slice) / (abs(weighted_val)+1))
+        #    println("reduced_val=$reduced_val")
+
+        # Calculate the new cell value based on surrounding cells
+        # weighting of the value of each neighboring cell; logical &&; some algorithm to transform cells;
+        # use matrix math or embedded loops to calculate new center cell value
+        if haskey(filter,reduced_val)
+            new_val,switched = filter[reduced_val](colony[co_y,co_x][1])
+        else
+            new_val,switched = saf(colony[co_y,co_x][1])
+        end
+
+        #   println("new_val=$new_val switched=$switched")
+          new_colony[co_y,co_x] = (new_val,switched)
+        end
+    end
+    new_colony
+end
+
+function move_colony(cctx::CairoContext, offsets::Array{Tuple{Int64,Int64},1})
+
+end
+
+# MAIN CODE STARTS HERE
+
+weights = generate_weights()
+# wsum = sum(weights)
+ # println("wsum=$wsum")
+
+neighbor_sums = Int64[0,1,2,3,4,5,6,7,8,9]
+filter_ary = generate_state_filters(neighbor_sums)
+# filter_ary = []
+# od = Dict{Int64,Function}(x=>of for x in [5])
+# zd = Dict{Int64,Function}(x=>zf for x in [2])
+# sad = Dict{Int64,Function}(x=>saf for x in [3,4,9])
+# swd = Dict{Int64,Function}(x=>swf for x in [0,1,6,7,8])
+# push!(filter_ary,merge(od,zd,sad,swd))
+
+println("Found $(size(filter_ary,1)) filters to evaluate.")
+c=0
+for filter in randsubseq(filter_ary,0.001)
+# println("Found $(size(keys(filter_ary[1]))) filters.")
+    # println("Calculating colonies for filter $filter")
+if c > 20
+    break
+end
+    colonyFileName = make_filename()
+
+# drawing context
+    crgb = CairoRGBSurface(COMMONWEALTH_X * COLONY_X * SCALE_FACTOR, COMMONWEALTH_Y * COLONY_Y * SCALE_FACTOR)
+    cctx = cctx = CairoContext(crgb)
+    #  create_drawing_context(crgb, COMMONWEALTH_X * COLONY_X, COMMONWEALTH_Y * COLONY_Y)
+
+    Cairo.scale(cctx,SCALE_FACTOR,SCALE_FACTOR)
+# store a non-translated version of the context matrix
+    Cairo.save(cctx)
+
+    ctm = Cairo.get_matrix(cctx)
+    # println("ctm is $ctm")
+
+# initialize colony with random 0-1 (could also set to 0 except for seed values)
+# colony = rand([0,1],COLONY_X,COLONY_Y)
+# colony = initializeColony(COLONY_X, COLONY_Y, false)
+# colony = reshape([i for i=1:100],(10,10))
+# colony = reshape([(x,y) for x in zeros(COLONY_X) for y in falses(1,COLONY_Y)],(COLONY_X,COLONY_Y))
+# println("Starting with colony $colony")
+    colony = initializeColony(COLONY_X, COLONY_Y, false)
+# println("Starting with colony $colony")
+#draw the first colony
+
+# draw the first one
+    # @profile draw_colony(colony, cctx)
+    draw_colony(colony, cctx)
+    offsets = get_offsets("spiral")
+    # offsets = get_random_offsets((Int64)(round(0.8*COMMONWEALTH_X*COMMONWEALTH_Y)))
+
+    offset_len = size(offsets,1)
+
+    # println("after drawing and translating colony ctm is $(Cairo.get_matrix(cctx))")
+# translate the user-space origin over to start the next colony
+# Cairo.translate(cctx,COLONY_X,0)
+
+    i=0
+    try
+        for i in 1:COMMONWEALTH_X*COMMONWEALTH_Y
+            if i > offset_len
+                break
+            end
+            offset = offsets[i]
+
+            Cairo.translate(cctx,first(offset),last(offset))
+            # Skip the first one because we already drew it.
+                # if j==1 && i==1
+                #     continue
+                # end
+                #
+            new_colony = calculate_colony(colony,weights,filter)
+                # println("colony=$colony")
+                # println("new_colony=$new_colony")
+            if new_colony==colony
+              throw("Boring!")
+            end
+            draw_colony(new_colony, cctx)
+                # Cairo.translate(cctx,COLONY_X,0)
+                # println("after drawing and translating colony ctm is $(Cairo.get_matrix(cctx))")
+            colony = new_colony
+            # Cairo.set_matrix(cctx,ctm)
+          end
+          # like a typewriter, reset the origin back to the start of the line
+        #   println("tx_count=$tx_count")
+        #   println("Moving origin by $(-tx_count*COLONY_X),$(COLONY_Y)")
+        #   Cairo.set_matrix(cctx,ctm)
+        #   Cairo.translate(cctx,0,j*COLONY_Y)
+        #   println("after resetting and translating y ctm is $(Cairo.get_matrix(cctx))")
+        #   tx_count = 0
+        #   Cairo.translate(cctx,0,j*COLONY_Y)
+        # end
+    catch ex
+        println("Caught exception $ex")
+    #     catch_backtrace()
+        println("Skipping boring colony to try the next filter...")
+    finally
+        write_to_png(crgb,colonyFileName)
+        println("Wrote file $colonyFileName successfully.")
+    end
+    c += 1
+end
+println("Done.")
+# open("prof.txt", "w") do s
+#     Profile.print(IOContext(s, :displaysize => (24, 500)))
+# end

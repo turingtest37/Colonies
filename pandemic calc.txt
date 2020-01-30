@@ -1,0 +1,11 @@
+each square represents 1000 people = ~ 1 village
+each square is represented by a population vector P with 4 columns: S I V M
+on each generation, we calculate a transition matrix T whose component probabilities are calculated based on current i,j square's P and the neighboring Ps => use a mask to determine the weighting of the neighbors on T: e.g. 1 for <i,j>, 1/2 for <i-1,j-1>, 1/4 for <i-2,j-2>, etc., IOW component probabilities of T are calculated based on P[i,j]*M where i ∈ {-2,2}, j ∈ {-2,2} and M is the weight mask 
+T[1] = infection(P[1])
+T[2] = 
+P' = PT
+draw P' according to colors S I V = G R B with M as white->black component
+
+probabilities in T:
+i = p(S->I) = Use count of infected neighbors as n in hn^n to determine local probability of infection
+                                                                                                              
