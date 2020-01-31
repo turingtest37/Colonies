@@ -123,18 +123,10 @@ end
 a square matrix.
 """
 function maskfromstring(s::AbstractString)
-    a::AbstractArray = eval(parse(s))
+    a::AbstractArray = eval(Meta.parse(s))
     n = size(a,1)
     # assuming a square matrix
     return Mask(SMatrix{eval(n),eval(n)}(a))
-    #
-    # if size(a,1) == 5 && size(a,2) == 5
-    #     return Mask(SMatrix{5,5}(a))
-    # elseif size(a,1) == 7 && size(a,2) == 7
-    #     return Mask(SMatrix{7,7}(a))
-    # else
-    #     return nothing
-    # end
 end
 
 Base.length(iter::MaskIter) = Base.length(iter.i)

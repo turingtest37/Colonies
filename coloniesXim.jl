@@ -21,7 +21,7 @@ const MAX_FILTER_COUNT = 20
 
 const ID_REGEX = r"^\w+\-([\w\-]*)$"
 
-const DB_FILE_NAME = "colony4j.csv"
+const DB_FILE_NAME = "colony4jim.csv"
 const DB_HEADERS = String["id","file","seed","mask","filter","repeater","repeatidx"]
 
 @enum ColonySeed blank=1 square=2 random=3

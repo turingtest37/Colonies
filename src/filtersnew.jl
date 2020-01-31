@@ -33,6 +33,28 @@ mutable struct FilterIterator
     state::FilterState
 end
 
+# It will be a miracle if this works.
+# function Base.length(iter::FilterIterator)
+#
+#     res = []
+#     t = Base.iterate(iter)
+#     while t != nothing
+#         v,s = t[1],t[2]
+#         push!(res, v)
+#         t = Base.iterate(iter, s)
+#     end
+#     Base.length(res)
+#
+#     # # 500000
+#     # ilist = Any[]
+#     # for f in (iter.i1, iter.i2, iter.i3, iter.i4, iter.coeff_i, iter.bucket_i)
+#     #     !isnothing(f) && push!(ilist, f)
+#     # end
+#     # @debug "ilist" ilist
+#     #
+#     # foldr(*, (Base.length(f) for f in ilist), init=1)
+# end
+
 struct StateFilter
     d::Dict{Int64,Function}
 end
@@ -226,7 +248,7 @@ function filterfromstring(s::AbstractString)
 end
 
 
-function generate_state_filters(isshuffled = false)
+function generate_state_filters(isshuffled::Bool = false)
 
     @info "Generating state filters..."
 

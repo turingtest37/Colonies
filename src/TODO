@@ -1,0 +1,6 @@
+Add Layout structure that supports
+	tiled mode
+	stacked mode for animated GIF
+
+Add support for pixel scale => e.g. use 4 pixels to represent 1 cell => allows for larger images w/o the long processing time
+
