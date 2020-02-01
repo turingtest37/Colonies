@@ -176,10 +176,13 @@ function calculatecommonwealth(context::CommonwealthContext)
     idx = nothing
     for i in 2:cwcnt
         new_colony = calculatenewcolony(colony, context)
-        idx = indexin(new_colony, colonies)
+        # repeater = in(new_colony, colonies)
+        idx = first(indexin([new_colony], colonies))
         if idx != nothing
+            @debug "idx=" idx
             repeater = true
             idx = first(idx)
+            @info "Colony repeats at index $(idx)!"
         end
         push!(colonies, new_colony)
         colony = new_colony
@@ -305,7 +308,7 @@ function buildimage(context::CommonwealthContext)
     repeats = colonyres.repeats
     repeatidx = colonyres.repeatidx
 
-    @debug "colonies has size $(size(colonies)) and $(repeats ? "repeats" : "does not repeat") with index $(repeatidx)"
+    @debug "colonies has size $(size(colonies)) and $(repeats ? "repeats with index $repeatidx." : "does not repeat.")"
     # colonies is a stack (i.e. array) of image arrays which can be layed out
     # as a nxm tiled image or as an "animated gif" with nxm layers.
 
