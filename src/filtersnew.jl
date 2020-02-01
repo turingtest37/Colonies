@@ -135,7 +135,7 @@ function Base.iterate(iter::FilterIterator, state::FilterState)
             iter.bucket_i = permutations(b, 4)
             return Base.iterate(iter)
         else
-            @warn "refreshbuckets() returned nothing! Bailing out!"
+            @debug "refreshbuckets() returned nothing! Bailing out!"
             return nothing
         end
     end
@@ -224,7 +224,7 @@ function refreshbuckets(fi::FilterIterator)
                     @warn "Reiterate threw an exception: $(e)"
                 end
             else
-                @warn "We are out of coefficients! Time to go home."
+                @debug "We are out of coefficients! Time to go home."
                 return nothing
             end
         end
@@ -238,8 +238,8 @@ function filterfromstring(s::AbstractString)
     drev = Dict{String,Function}("0"=>nyet, "1"=>un, "switch"=>changer, "same"=>meme)
     for s in split(s,';')
         a = split(s,"=>")
-        if isa(eval(parse(a[1])),Array)
-            for i in eval(parse(a[1]))
+        if isa(eval(Meta.parse(a[1])),Array)
+            for i in eval(Meta.parse(a[1]))
                 d[Integer(i)]=drev[a[2]]
             end
         end

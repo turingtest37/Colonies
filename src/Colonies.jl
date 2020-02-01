@@ -4,11 +4,8 @@ using CSV
 using Query
 using Random
 using UUIDs
-# using OffsetArrays
 using Colors
 
-include("filtersnew.jl")
-include("masks.jl")
 # include("Filters.jl")
 # using .Filters
 # include("maskmod.jl")
@@ -17,6 +14,8 @@ include("masks.jl")
 const MAX_FILTER_COUNT = 20
 @enum ColonySeed blank=1 square=2 random=3
 
+include("filtersnew.jl")
+include("masks.jl")
 include("persistence.jl")
 
 mutable struct CommonwealthContext
@@ -27,6 +26,7 @@ mutable struct CommonwealthContext
     mask::Union{Mask, Nothing}
     filter::Union{StateFilter, Nothing}
     seed::Union{ColonySeed, Nothing}
+    layout::Union{CWLayout, Nothing}
 
     # CommonwealthContext(nbx::Int, nby::Int, colonyx::Int, colonyy::Int, seed::ColonySeed=blank) = new(nbx,nby,colonyx,colonyy,nothing,nothing,seed)
 end
@@ -109,12 +109,14 @@ function calculatenewcolony(colony::Array{T}, context::CommonwealthContext) wher
     ctype = eltype(colony)
     colonyysize, colonyxsize = size(colony)
 
+    maskdepth = div(size(maskmat, 1), 2)
+
     # create a blank target colony
     new_colony = initialize_colony(ctype, colonyxsize, colonyysize, blank)
 
-    mini = minj = 2
-    maxi = size(colony, 2)-1
-    maxj = size(colony, 1)-1
+    mini = minj = 1 + maskdepth
+    maxi = size(colony, 2) - maskdepth
+    maxj = size(colony, 1) - maskdepth
     for i in axes(colony, 2)
         ilims = i < mini || i > maxi
         ilims && continue
@@ -122,7 +124,7 @@ function calculatenewcolony(colony::Array{T}, context::CommonwealthContext) wher
             jlims = j < minj || j > maxj
             jlims && continue
 
-            neighborhood = view(colony, j-1:j+1, i-1:i+1, 1)
+            neighborhood = view(colony, j-maskdepth:j+maskdepth, i-maskdepth:i+maskdepth, 1)
             # @debug "neighborhood = $(neighborhood)"
             reduced_val = f(neighborhood, maskmat)
             # @debug "Reduced val = $(reduced_val)"
@@ -171,8 +173,62 @@ function calculatecommonwealth(context::CommonwealthContext)
     return colonies, repeater
 end
 
-function redraw(filename::AbstractString)
-    body
+""" redraw(filename::AbstractString)
+
+    Look up the given filename in the colonies database (colony4j.csv)
+    and attempt to re
+
+"""
+function redraw(filename::AbstractString, dd::AbstractString, cwx, cwy, colonyx, colonyy; layout = TiledLayout("png"))
+    @debug "filename=$filename"
+    id = idfromcolonyfilepath(filename)
+    @info "Searching for record with id='$id'"
+    # search for filename in archive DataFrame
+    # open CSV archive file as a DataFrame
+    df = CSV.read(db_filename(); types=[String, String, String, String, String, String], header=DB_HEADERS, datarow=2, delim=',')
+    record = archiverowfromid(df,id)
+    # println(record)
+    # if record found, get mask and filter
+    if first(size(record)) > 0
+        # convert mask and filter to objects
+        s = first(record[!, 1])
+        m = first(record[!, 2])
+        f = first(record[!, 3])
+
+        seed::ColonySeed = eval(Meta.parse(s))
+        @debug "Recovered seed=$seed"
+
+        mask::Mask = maskfromstring(m)
+        @debug "Recovered mask=$mask"
+
+        filter::StateFilter = filterfromstring(f)
+        @debug "Recovered filter=$filter"
+
+        if isnothing(layout)
+            layout = layoutforfile(filename)
+        end
+        @debug "layout = $(layout)"
+
+        if !isdir(dd)
+            dd = create_save_dir(dd, "", true)
+        end
+
+        # call calculatecommonwealth
+        context = CommonwealthContext(cwx, cwy, colonyx, colonyy, mask, filter, seed, layout)
+        img, repeater = buildimage(context)
+        save_image_info(img,dd,context,repeater)
+    else
+        @warn "Failed to find record for $(filename)"
+    end
+end
+
+function layoutforfile(filename::AbstractString)
+    ext = last(Base.Filesystem.splitext(fn))
+    if lowercase(ext) == ".gif"
+        return StackedLayout()
+    else
+        return TiledLayout(ext)
+    end
 end
 
 """ scanandredraw
@@ -187,44 +243,11 @@ function scanandredraw(srcdir::AbstractString, destdir::AbstractString, cwx::Int
         mkpath(dd)
     end
 
-    # open CSV archive file as a DataFrame
-    df = CSV.read(db_filename(); types=[String, String, String, String, String, String], header=DB_HEADERS, datarow=2, delim=',')
-
     # get list of files in provided directory
     ls = readdir(sd)
     for filename in ls
-        @debug "filename=$filename"
         startswith(filename,'.') ? continue : nothing
-        id = idfromcolonyfilepath(filename)
-        @info "Searching for record with id='$id'"
-        # search for filename in archive DataFrame
-        record = archiverowfromid(df,id)
-        # println(record)
-        # if record found, get mask and filter
-        if length(record) > 0
-            # println("'$record'")
-
-            # convert mask and filter to objects
-            s = first(record[!, 1])
-            m = first(record[!, 2])
-            f = first(record[!, 3])
-
-            seed::ColonySeed = eval(Meta.parse(s))
-            @debug "Recovered seed=$seed"
-
-            mask::Mask = maskfromstring(m)
-            @debug "Recovered mask=$mask"
-
-            filter::StateFilter = filterfromstring(get(f[1]))
-            @debug "Recovered filter=$filter"
-
-            # call calculatecommonwealth
-            context = CommonwealthContext(cwx, cwy, colonyx, colonyy, mask, filter, seed)
-            img, repeater = makecwimage(context)
-            save_image_info(img,dd,context,repeater)
-        else
-            @warn "Failed to find record for $(filename)"
-        end
+        redraw(filename, destdir, cwx, cwy, colonyx, colonyy)
     end
 end
 
@@ -238,40 +261,72 @@ function zipperzapper(r::UnitRange{Int}, dim::Int, shufflefilters::Bool)
     zip(mx, filters)
 end
 
-function makecwimage(context::CommonwealthContext)
+
+"""
+Stack each NxN float array vertically (dim=3) and convert to grayscale.
+"""
+function layoutimage(lo::StackedLayout, imgstack::Array, context::CommonwealthContext)
+    return Gray.(cat(imgstack[1:end]...,dims=3))
+end
+
+"""
+Tile the images in the stack using parameters of the context and convert to grayscale.
+"""
+function layoutimage(lo::TiledLayout, imgstack::Array, context::CommonwealthContext)
+    return Gray.(hvcat(context.ysize, imgstack[1:end]...))
+end
+
+
+"""
+
+"""
+function buildimage(context::CommonwealthContext)
+    # All the heavy lifting takes place in calculatecommonwealth
     colonies, repeater = calculatecommonwealth(context)
+
+    @debug "colonies has size $(size(colonies))"
+    # colonies is a stack (i.e. array) of image arrays which can be layed out
+    # as a nxm tiled image or as an "animated gif" with nxm layers.
+
+    # First, convert each layer into a matrix of floats whose values {0, 1/3, 2/3, 1}
+    # represent the four states of a cell. This will determine the cell's color.
     stack = map(c -> (c[:,:,1] .<< 1 .+ c[:,:,2]) .* 1/3, colonies)
 
+    layout = context.layout
+    if isnothing(layout)
+        layout = TiledLayout("png")
+    end
+
+    img = layoutimage(layout, stack, context)
+    @debug "layed out image has size $(size(img))"
     # stack each NxN float array vertically (dim=3) and convert to grayscale
-    img = Gray.(cat(stack[1:end]...,dims=3))
     return img, repeater
 end
 
-function generatemany(cwx, cwy, colony_x, colony_y, extremerandom::Bool; limit = -1)
-    seed = ColonySeed(rand(1:3))
-    @debug "Seeding new CW with $(seed)"
+function generatemany(cwx, cwy, colony_x, colony_y, extremerandom::Bool; limit = -1, layout = TiledLayout("png"))
     regfiledir = create_save_dir("regular")
     repeatfiledir = create_save_dir("repeat")
     cnt = 0
     if extremerandom
         for p in zipperzapper(1:4, 3, true)
             mask, filter = p[1], p[2]
-            context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mask, filter, seed)
-            img, repeater = makecwimage(context)
-            save_image_info(img, (repeater ? repeatfiledir : regfiledir), seed, mask, filter, repeater)
+            @debug "mask=$(mask), filter=$(filter)"
+            seed = ColonySeed(rand(1:3))
+            @debug "Seeding new CW with $(seed)"
+            context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mask, filter, seed, layout)
+            img, repeater = buildimage(context)
+            save_image_info(img, (repeater ? repeatfiledir : regfiledir), context, repeater)
             cnt += 1
             if limit > 0 && cnt >= limit
                 return cnt
             end
         end
     else
-        generatemany(cwx,cwy,colony_x,colony_y,limit)
+        generatemany(cwx,cwy,colony_x,colony_y,limit,layout)
     end
 end
 
-function generatemany(cwx, cwy, colony_x, colony_y; limit = -1)
-    seed = ColonySeed(rand(1:3))
-    @debug "Seeding new CW with $(seed)"
+function generatemany(cwx, cwy, colony_x, colony_y; limit = -1, layout = TiledLayout("png"))
     # Generate new directories for each run
     regfiledir = create_save_dir("regular")
     repeatfiledir = create_save_dir("repeat")
@@ -286,8 +341,10 @@ function generatemany(cwx, cwy, colony_x, colony_y; limit = -1)
                 break
             end
             fc += 1
-            context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mask, filter, seed)
-            img, repeater = makecwimage(context)
+            seed = ColonySeed(rand(1:3))
+            @debug "Seeding new CW with $(seed)"
+            context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mask, filter, seed, layout)
+            img, repeater = buildimage(context)
             save_image_info(img, (repeater ? repeatfiledir : regfiledir), seed, mask, filter, repeater)
             cnt += 1
             if limit > 0 && cnt >= limit
@@ -309,7 +366,8 @@ function regeneratebest()
     mask = Union{Mask, Nothing}()
     filter = Union{Mask, Nothing}()
     seed = Union{Mask, Nothing}()
-    context = CommonwealthContext(xsize,ysize,colonyxsize,colonyysize,mask,filter,seed)
+    layout = TiledLayout("png")
+    context = CommonwealthContext(xsize,ysize,colonyxsize,colonyysize,mask,filter,seed,layout)
 
     scanandredraw(srcdir, destdir, context)
 end
@@ -338,13 +396,15 @@ function main(args::Array{String})
 
     offsets = normal_offsets(xsize, ysize, colonyxsize, colonyysize)
 
-    context = CommonwealthContext(xsize, ysize, colonyxsize, colonyysize, mask, filter, seed)
+    layout = TiledLayout("png")
+
+    context = CommonwealthContext(xsize, ysize, colonyxsize, colonyysize, mask, filter, seed, layout)
 
     filedir = create_save_dir("$filter")
     # println("offsets are $offsets")
     # offsets = get_random_offsets((Int)(round(0.8*COMMONWEALTH_X*COMMONWEALTH_Y)))
-    repeater::Bool = calculatecommonwealth(context)
-    save_image_info(crgb, filedir, seed, mask, filter, repeater)
+    img, repeater = buildimage(context)
+    save_image_info(img, filedir, seed, mask, filter, repeater)
     println("Done.")
 end
 

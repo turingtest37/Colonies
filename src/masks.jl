@@ -135,6 +135,7 @@ Base.eltype(::Type{MaskIter}) = Mask
 """Returns an iterator of square, weighted masks.
 """
 function generate_masks(weightrange::UnitRange, dim::Int = 5)
+    @info "Generating masks..."
     pairs = generate_coord_pairs(dim)
     return MaskIter(permutations(pairs,4), Dict{Array{Int,2},Bool}(), weightrange, dim)
 end
