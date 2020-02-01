@@ -147,18 +147,18 @@ function generate_weights(weightrange::UnitRange{Int}, dim::Int)
     @debug "rweights=$(rweights)"
 
     weightsets = Dict{Int,Tuple}([
-    (3, ([Symbol(a) for a in 'a':'d'],
+    3 => ([Symbol(a) for a in 'a':'d'],
             Meta.parse("[a b a;
                         c d c
-                        a b a]"))),
-    (5, ([Symbol(a) for a in 'a':'h'],
+                        a b a]")),
+    5 => ([Symbol(a) for a in 'a':'h'],
             Meta.parse("[
                         a b c b a;
                         d e f e d;
                         g h i h g;
                         d e f e d;
-                        a b c b a]")))],
-    (7, ([Symbol(a) for a in 'a':'p'],
+                        a b c b a]")),
+    7 => ([Symbol(a) for a in 'a':'p'],
     Meta.parse("[
                 a b c d c b a;
                 e f g h g f e;
@@ -166,7 +166,7 @@ function generate_weights(weightrange::UnitRange{Int}, dim::Int)
                 m n o p o n m;
                 i j k l k j i;
                 e f g h g f e;
-                a b c d c b a]"))))
+                a b c d c b a]"))])
     #build and populate the matrix
     @debug "dict = $(weightsets)"
 
