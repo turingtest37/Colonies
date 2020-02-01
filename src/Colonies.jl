@@ -27,9 +27,19 @@ mutable struct CommonwealthContext
     filter::Union{StateFilter, Nothing}
     seed::Union{ColonySeed, Nothing}
     layout::Union{CWLayout, Nothing}
-
     # CommonwealthContext(nbx::Int, nby::Int, colonyx::Int, colonyy::Int, seed::ColonySeed=blank) = new(nbx,nby,colonyx,colonyy,nothing,nothing,seed)
 end
+
+mutable struct ColonyResult
+    context::CommonwealthContext
+    colonies::Union{Array{Array{Int}}, Nothing}
+    repeats::Union{Bool, Nothing}
+    repeatidx::Union{Int, Nothing}
+    filename::Union{AbstractString, Nothing}
+    animatedgif::Union{Bool, Nothing}
+    img::Any
+end
+
 
 function initialize_colony(T::Type{<:Number}, xsize::Int, ysize::Int, seed::ColonySeed)
 
@@ -90,8 +100,8 @@ end
 
 drawrepeatline!(img::Array, startpt::Tuple{Int,Int}, endpt::Tuple{Int,Int}; color=(1,0,0)) = setindex!(img, RGB(color), startpt[1]:endpt[1], startpt[2]:endpt[2])
 
-""" Return the result of applying an algorithm to neighborhood and mask
-to fix the return value as the given type of number. Default = Int."""
+""" Return the result of applying an algorithm to the neighborhood and the mask.
+"""
 function calcreducedval(neighborhood, mask)
     sum(mask) / max(sum(mask .* neighborhood),1.0)
 end
@@ -163,17 +173,23 @@ function calculatecommonwealth(context::CommonwealthContext)
     # Number of colonies in a commonwealth
     cwcnt = xsize*ysize
     # println("xsize=$xsize, ysize=$ysize, offsets=$(size(offsets))")
+    idx = nothing
     for i in 2:cwcnt
         new_colony = calculatenewcolony(colony, context)
-        repeater = in(new_colony, colonies)
+        idx = indexin(new_colony, colonies)
+        if idx != nothing
+            repeater = true
+            idx = first(idx)
+        end
         push!(colonies, new_colony)
         colony = new_colony
     end #offsetsend
 
-    return colonies, repeater
+    return ColonyResult(context, colonies, repeater, idx, nothing, nothing, nothing)
 end
 
-""" redraw(filename::AbstractString)
+"""
+    redraw(filename::AbstractString)
 
     Look up the given filename in the colonies database (colony4j.csv)
     and attempt to re
@@ -190,10 +206,11 @@ function redraw(filename::AbstractString, dd::AbstractString, cwx, cwy, colonyx,
     # println(record)
     # if record found, get mask and filter
     if first(size(record)) > 0
+        @debug "Recovered record" record
         # convert mask and filter to objects
-        s = first(record[!, 1])
-        m = first(record[!, 2])
-        f = first(record[!, 3])
+        s = first(record[!, 3])
+        m = first(record[!, 4])
+        f = first(record[!, 5])
 
         seed::ColonySeed = eval(Meta.parse(s))
         @debug "Recovered seed=$seed"
@@ -215,8 +232,8 @@ function redraw(filename::AbstractString, dd::AbstractString, cwx, cwy, colonyx,
 
         # call calculatecommonwealth
         context = CommonwealthContext(cwx, cwy, colonyx, colonyy, mask, filter, seed, layout)
-        img, repeater = buildimage(context)
-        save_image_info(img,dd,context,repeater)
+        colonyres = buildimage(context)
+        save_image_info(colonyres.img,dd,context,colonyres.repeats)
     else
         @warn "Failed to find record for $(filename)"
     end
@@ -282,9 +299,13 @@ end
 """
 function buildimage(context::CommonwealthContext)
     # All the heavy lifting takes place in calculatecommonwealth
-    colonies, repeater = calculatecommonwealth(context)
+    colonyres = calculatecommonwealth(context)
 
-    @debug "colonies has size $(size(colonies))"
+    colonies = colonyres.colonies
+    repeats = colonyres.repeats
+    repeatidx = colonyres.repeatidx
+
+    @debug "colonies has size $(size(colonies)) and $(repeats ? "repeats" : "does not repeat") with index $(repeatidx)"
     # colonies is a stack (i.e. array) of image arrays which can be layed out
     # as a nxm tiled image or as an "animated gif" with nxm layers.
 
@@ -300,7 +321,10 @@ function buildimage(context::CommonwealthContext)
     img = layoutimage(layout, stack, context)
     @debug "layed out image has size $(size(img))"
     # stack each NxN float array vertically (dim=3) and convert to grayscale
-    return img, repeater
+
+    # Add the image to the result object
+    colonyres.img = img
+    return colonyres
 end
 
 function generatemany(cwx, cwy, colony_x, colony_y, extremerandom::Bool; limit = -1, layout = TiledLayout("png"))
@@ -314,8 +338,8 @@ function generatemany(cwx, cwy, colony_x, colony_y, extremerandom::Bool; limit =
             seed = ColonySeed(rand(1:3))
             @debug "Seeding new CW with $(seed)"
             context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mask, filter, seed, layout)
-            img, repeater = buildimage(context)
-            save_image_info(img, (repeater ? repeatfiledir : regfiledir), context, repeater)
+            colonyres = buildimage(context)
+            save_image_info(colonyres.img, (colonyres.repeats ? repeatfiledir : regfiledir), context, colonyres.repeats)
             cnt += 1
             if limit > 0 && cnt >= limit
                 return cnt
@@ -403,9 +427,9 @@ function main(args::Array{String})
     filedir = create_save_dir("$filter")
     # println("offsets are $offsets")
     # offsets = get_random_offsets((Int)(round(0.8*COMMONWEALTH_X*COMMONWEALTH_Y)))
-    img, repeater = buildimage(context)
-    save_image_info(img, filedir, seed, mask, filter, repeater)
-    println("Done.")
+    colonyres = buildimage(context)
+    save_image_info(colonyres.img, filedir, context, colonyres.repeats)
+    @info "Done."
 end
 
 function encode(s::AbstractString)

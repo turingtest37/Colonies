@@ -12,6 +12,17 @@ const MIRRX_Y=@SMatrix [-0.5 -0.5;-0.5 -0.5]
 
 rng = Random.RandomDevice()
 
+mutable struct MaskIter{T,TT}
+    i::T
+    d::TT
+    wr::UnitRange
+    dim::Int
+end
+
+struct Mask{T}
+    m::T
+end
+
 # Pairs are all the possible permutations of coordinate offsets
 # from the current, center pixel. e.g. "-1,0" means "current x-1, current y"
 # Returns an array of all possible permutations -2 to +2
@@ -36,17 +47,6 @@ end
 
 # Returns false if the mask has already been used, either as-is, rotated or reflected
 ensure_unique_mask(maskDict::Dict, mask::Array{Int,2}) = !haskey(maskDict,mask)
-
-mutable struct MaskIter{T,TT}
-    i::T
-    d::TT
-    wr::UnitRange
-    dim::Int
-end
-
-struct Mask{T}
-    m::T
-end
 
 Base.show(io::IO, mask::Mask) = print(io, mask.m)
 
@@ -157,7 +157,16 @@ function generate_weights(weightrange::UnitRange{Int}, dim::Int)
                         d e f e d;
                         g h i h g;
                         d e f e d;
-                        a b c b a]")))])
+                        a b c b a]")))],
+    (7, ([Symbol(a) for a in 'a':'p'],
+    Meta.parse("[
+                a b c d c b a;
+                e f g h g f e;
+                i j k l k j i;
+                m n o p o n m;
+                i j k l k j i;
+                e f g h g f e;
+                a b c d c b a]"))))
     #build and populate the matrix
     @debug "dict = $(weightsets)"
 

@@ -35,7 +35,9 @@ create_save_dir(dirtype::AbstractString) = create_save_dir("img", dirtype, true)
 
 function archive_image_db(dbf::AbstractString, colonyid, colonypath::AbstractString, seed::ColonySeed, mask::Mask, filter::StateFilter, repeater::Bool)
     df = DataFrame(id=string(colonyid), name=colonypath, seed="$seed", mask="$mask", filter="$filter", repeater="$repeater")
-    CSV.write(dbf, df; delim=',', header=DB_HEADERS, append=true)
+    io = open(dbf, "a")
+    CSV.write(io, df; delim=',', header=DB_HEADERS, append=true)
+    close(io)
 end
 
 
@@ -56,11 +58,8 @@ end
 
 function idfromcolonyfilepath(filepath::AbstractString)
     basename = splitext(Base.Filesystem.basename(filepath))
-    # println("basename=$basename")
     re = match(ID_REGEX,basename[1])
-    # println("re=$re")
     return re[1]
-    # join(split(basename[1],'-')[2:end])
 end
 
 function archiverowfromid(df::DataFrame, id::AbstractString)
