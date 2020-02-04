@@ -34,7 +34,7 @@ mutable struct ColonyResult
     context::CommonwealthContext
     colonies::Union{Array{Array{Int}}, Nothing}
     repeats::Union{Bool, Nothing}
-    repeatidx::Union{Int, Nothing}
+    repeatidx::Union{Vector{Int}, Nothing}
     filename::Union{AbstractString, Nothing}
     animatedgif::Union{Bool, Nothing}
     img::Any
@@ -106,7 +106,11 @@ function calcreducedval(neighborhood, mask)
     sum(mask) / max(sum(mask .* neighborhood),1.0)
 end
 
-f(neighborhood, mask) = calcreducedval(neighborhood, mask)
+# What a difference a dot makes!
+reducedwithmm(neighborhood, mask) = sum(mask) / max(sum(mask * neighborhood), 1.0)
+
+# f(neighborhood, mask) = calcreducedval(neighborhood, mask)
+f(neighborhood, mask) = reducedwithmm(neighborhood, mask)
 
 # calculatenewcolony(colony::Array{T}, context::CommonwealthContext) where {T<:Number} = calculatenewcolony(f, colony, context)
 
@@ -173,23 +177,22 @@ function calculatecommonwealth(context::CommonwealthContext)
     # Number of colonies in a commonwealth
     cwcnt = xsize*ysize
     # println("xsize=$xsize, ysize=$ysize, offsets=$(size(offsets))")
-    idx = nothing
+    idxs = Int[]
     for i in 2:cwcnt
         new_colony = calculatenewcolony(colony, context)
         # repeater = in(new_colony, colonies)
-        if !repeater
-            idx = first(indexin([new_colony], colonies))
-            if idx != nothing
-                idx = first(idx)
-                @info "Colony repeats at index $(idx)!"
-                repeater = true
-            end
+        idx = first(indexin([new_colony], colonies))
+        if idx != nothing
+            idx = first(idx)
+            push!(idxs, idx)
+            @debug "colony repeats at index $(idx)!"
+            repeater = true
         end
         push!(colonies, new_colony)
         colony = new_colony
     end #offsetsend
 
-    return ColonyResult(context, colonies, repeater, idx, nothing, nothing, nothing)
+    return ColonyResult(context, colonies, repeater, idxs, nothing, nothing, nothing)
 end
 
 """
@@ -243,6 +246,8 @@ end
 
 # function redraw(filename::AbstractString, dd::AbstractString, cwx, cwy, colonyx, colonyy; layout = TiledLayout("png"))
 
+# commonargs =
+
 """
     redraw(filename::AbstractString)
 
@@ -250,19 +255,24 @@ end
     and attempt to re
 
 """
-function redraw(file_or_id::AbstractString, dd::AbstractString, cwx::Int, cwy::Int, colonyx::Int, colonyy::Int;
-    mask::Mask=nothing,
-    filter::StateFilter=nothing,
-    seed::ColonySeed=nothing,
-    layout::CWLayout = TiledLayout("png"))
+function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int, cwy::Int, colonyx::Int, colonyy::Int;
+    mask::Union{Mask,Nothing} = nothing,
+    filter::Union{StateFilter,Nothing} = nothing,
+    seed::Union{ColonySeed,Nothing} = nothing,
+    layout::CWLayout = TiledLayout("png"),
+    maskrange::UnitRange{Int} = 1:4,
+    maskdim::Int = 3,
+    shuffle::Bool = true,
+    )
 
     t = splitext(file_or_id)
     if t[2] == ""
         # assume id
         id = t[2]
+        @debug "id=$id"
     else
-        @debug "filename=$filename"
-        id = idfromcolonyfilepath(filename)
+        @debug "file_or_id=$file_or_id"
+        id = idfromcolonyfilepath(file_or_id)
     end
 
     # only look up the DB record if we have to
@@ -294,14 +304,15 @@ function redraw(file_or_id::AbstractString, dd::AbstractString, cwx::Int, cwy::I
         end
         @debug "layout = $(layout)"
 
-        if !isdir(dd)
-            mkdir(dd)
+        if !isdir(destdir)
+            mkdir(destdir)
         end
 
         # call calculatecommonwealth
         context = CommonwealthContext(cwx, cwy, colonyx, colonyy, mask, filter, seed, layout)
         colonyres = buildimage(context)
-        save_image_info(colonyres.img,dd,context,colonyres.repeats)
+        img = colonyres.img
+        save_image_info(img,destdir,context,colonyres.repeats)
     else
         @warn "Failed to find record for $(filename)"
     end
@@ -336,6 +347,11 @@ function scanandredraw(srcdir::AbstractString, destdir::AbstractString, cwx::Int
     end
 end
 
+"""
+Collects all StateFilters (~573120) and all Masks (3024), repeating
+the mask vector as many times as needed in order to provide a result of
+one pair of (StateFilter, Mask) from the zip function iterator.
+"""
 function zipperzapper(r::UnitRange{Int}, dim::Int, shufflefilters::Bool)
     m = collect(generate_masks(r, dim))
     filters = StateFilter[]
@@ -364,6 +380,9 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
         regfiledir = create_save_dir("regular")
         repeatfiledir = create_save_dir("repeat")
     else
+        if !isdir(destdir)
+            mkpath(destdir)
+        end
         regfiledir = repeatfiledir = destdir
     end
 
@@ -373,9 +392,9 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
         for p in zipperzapper(maskrange, maskdim, shuffle)
             isnothing(mask) && (mm = p[1])
             isnothing(filter) && (ff = p[2])
-            isnothing(seed) && (seed = ColonySeed(rand(1:3)))
-            @debug "mask=$(mm), filter=$(ff), seed=$(seed)"
-            context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, seed, layout)
+            isnothing(seed) && (ss = ColonySeed(rand(1:3)))
+            @debug "mask=$(mm), filter=$(ff), seed=$(ss)"
+            context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout)
             colonyres = buildimage(context)
             img, repeater = colonyres.img, colonyres.repeats
             save_image_info(img, (repeater ? repeatfiledir : regfiledir), context, repeater)
@@ -464,25 +483,8 @@ function main(args::Array{String})
     @info "Done."
 end
 
-function encode(s::AbstractString)
-    m = rand(Mask, collect(generate_masks(1:4, 3)))
-    f = rand(StateFilter, collect(generate_state_filters(false)))
-    encode(s, m, f)
-end
 
-function encode(s::AbstractString, mask::Mask, filter::StateFilter)
-
-
-    context = CommonwealthContext()
-
-    # a 7 x n matrix where n = nb of characters in string s
-    A = hcat((digits(UInt8(c), base=2) for c in s)...)
-    # think about this later!!!
-
-end
-
-
-# MAIN CODE STARTS HERE
+# CLIENT CODE STARTS HERE
 # main(Base.ARGS)
 # generatemany(commonwealth_x,commonwealth_y,colony_x,colony_y,scale_factor)
 # generatemany(5,5,50,50)
