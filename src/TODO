@@ -1,6 +1,14 @@
 Add Layout structure that supports
 	tiled mode
-	stacked mode for animated GIF
+	stacked mode for animated GIF (DONE!)
 
-Add support for pixel scale => e.g. use 4 pixels to represent 1 cell => allows for larger images w/o the long processing time
+Add support for pixel scale => e.g. use 4 pixels to represent 1 cell => allows for larger images w/o the long processing time [?? not sure this is a great idea, given that ImageMagick exists...]
+
+Add ability to tweak existing patterns incrementally. Set Mask. Set StateFilter.
+
+generatemany options for max # of filters and masks to try before changing
+	choice of evaluation order (mask first or filter first) should be done at runtime - use Metaprogramming!!!!
+	
+Try formula with matrix multiplication instead of element-wise
+
 

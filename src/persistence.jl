@@ -31,6 +31,7 @@ function create_save_dir(dirname::AbstractString, dirtype::AbstractString, rndna
     return name
 end
 
+create_save_dir(dirname::AbstractString, rndname::Bool) = create_save_dir(dirname, "", rndname)
 create_save_dir(dirtype::AbstractString) = create_save_dir("img", dirtype, true)
 
 function archive_image_db(dbf::AbstractString, colonyid, colonypath::AbstractString, seed::ColonySeed, mask::Mask, filter::StateFilter, repeater::Bool)
@@ -76,5 +77,9 @@ function info(filename::AbstractString)
     @info "Searching for record with id='$id'"
     # search for filename in archive DataFrame
     r = archiverowfromid(df,id)
-    show(r, allcols=true)
+    if size(df, 1) < 1
+        println("No record found for file $(filename)")
+    else
+        show(r, allcols=true)
+    end
 end
