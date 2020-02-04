@@ -1,8 +1,10 @@
-const DB_FILE_NAME = "colony4j.csv"
-const DB_HEADERS = String["id","file","seed","mask","filter","repeater"]
-const ID_REGEX = r"^\w+\-([\w\-]*)$"
+using Dates
 
-abstract type CWLayout end
+const DB_FILE_NAME = "colony4j2.csv"
+const DB_HEADERS = String["id","file","cwx","cwy","colx","coly","seed","mask","filter","repeater","repeatidx","layout"]
+const DB_ELTYPES = [String, String, Int, Int, Int, Int, String, String, String, Bool, String, String]
+const ID_REGEX = r"^\w+\-([\w\-]*)$"
+const HHMMSS_FORMAT = dateformat"HHMMSS"
 
 struct TiledLayout <: CWLayout
     ext::AbstractString
@@ -23,8 +25,8 @@ function db_filename()
     return DB_FILE_NAME
 end
 
-function create_save_dir(dirname::AbstractString, dirtype::AbstractString, rndname::Bool = true)
-    name = joinpath(dirname, dirtype, (rndname ? string(rand(1:1000000)) : ""))
+function create_save_dir(dirname::AbstractString, dirtype::AbstractString, mksubdir::Bool = true)
+    name = joinpath(dirname, dirtype, (mksubdir ? format(now(), HHMMSS_FORMAT) : ""))
     if !isdir(name)
         mkpath(name)
     end
@@ -34,26 +36,56 @@ end
 create_save_dir(dirname::AbstractString, rndname::Bool) = create_save_dir(dirname, "", rndname)
 create_save_dir(dirtype::AbstractString) = create_save_dir("img", dirtype, true)
 
-function archive_image_db(dbf::AbstractString, colonyid, colonypath::AbstractString, seed::ColonySeed, mask::Mask, filter::StateFilter, repeater::Bool)
-    df = DataFrame(id=string(colonyid), name=colonypath, seed="$seed", mask="$mask", filter="$filter", repeater="$repeater")
-    io = open(dbf, "a")
-    CSV.write(io, df; delim=',', header=DB_HEADERS, append=true)
+function archive_image_db(dbf::AbstractString; kwargs...)
+    # (k,v)
+    # S = :([Symbol(s)=", $(s)" for s in DB_HEADERS])
+    @debug "Saving image with args" kwargs
+    df = DataFrame(kwargs...)
+    @debug "Here she is..." df
+    io = nothing
+    if isfile(dbf)
+        io = open(dbf, "a")
+        CSV.write(io, df; delim=',', append=true)
+    else
+        @debug "Creating new archive file " dbf
+        io = open(dbf, "w")
+        CSV.write(io, df; delim=',', writeheader=true)
+    end
+
     close(io)
+    dbf
 end
 
-
-
-function save_image_info(img::Array{Gray{Float64}}, filedir::AbstractString, context, repeater::Bool)
+function save_image_info(result::ColonyResult, filedir::AbstractString)
+    context = result.context
+    img = result.img
     seed = context.seed
     mask = context.mask
     filter = context.filter
     layout = context.layout
-    colony_id = make_colony_id()
-    colonyFileName = make_filename(colony_id, filedir, layout.ext)
-    @debug "Attempting to save image to $(colonyFileName)"
-    save(colonyFileName, img)
-    archive_image_db(db_filename(),colony_id,colonyFileName,seed,mask,filter,repeater)
-    @info "Saved image file $colonyFileName"
+    id = make_colony_id()
+    file = make_filename(id, filedir, layout.ext)
+    @debug "Attempting to save image to $(file)"
+    save(file, img)
+
+    archive_image_db(db_filename();
+    :id => id,
+    :file => file,
+    :cwx => context.xsize,
+    :cwy => context.ysize,
+    :colx => context.colonyxsize,
+    :coly => context.colonyysize,
+    :seed => context.seed,
+    :mask => context.mask,
+    :filter => context.filter,
+    :repeater => result.repeats,
+    :repeatidx => (isnothing(result.repeatidx) ? string(Int[]) : string(result.repeatidx)),
+    :layout => context.layout
+    )
+
+    # archive_image_db(db_filename(),colony_id,colonyFileName,seed,mask,filter,repeater)
+    @debug "Saved image file $file"
+    return file
 end
 
 
@@ -66,13 +98,14 @@ end
 function archiverowfromid(df::DataFrame, id::AbstractString)
     @from i in df begin
     @where i.id==id
-    @select {i.id, i.file, i.seed, i.mask, i.filter, i.repeater}
+    @select i
     @collect DataFrame
     end
 end
 
 function info(filename::AbstractString)
-    df = CSV.read(db_filename(); types=[String, String, String, String, String, String], header=DB_HEADERS, datarow=2, delim=',')
+    # df = CSV.read(db_filename(); types=[String for i=1:length(DB_HEADERS)], header=DB_HEADERS, datarow=2, delim=',')
+    df = CSV.read(db_filename(); types=DB_ELTYPES, header=DB_HEADERS, datarow=2, delim=',')
     id = idfromcolonyfilepath(filename)
     @info "Searching for record with id='$id'"
     # search for filename in archive DataFrame

@@ -16,7 +16,8 @@ const MAX_FILTER_COUNT = 20
 
 include("filtersnew.jl")
 include("masks.jl")
-include("persistence.jl")
+
+abstract type CWLayout end
 
 mutable struct CommonwealthContext
     xsize::Int
@@ -40,6 +41,7 @@ mutable struct ColonyResult
     img::Any
 end
 
+include("persistence.jl")
 
 function initialize_colony(T::Type{<:Number}, xsize::Int, ysize::Int, seed::ColonySeed)
 
@@ -192,6 +194,9 @@ function calculatecommonwealth(context::CommonwealthContext)
         colony = new_colony
     end #offsetsend
 
+    # make the repeater indices unique
+    unique!(idxs)
+
     return ColonyResult(context, colonies, repeater, idxs, nothing, nothing, nothing)
 end
 
@@ -244,9 +249,16 @@ function buildimage(context::CommonwealthContext)
 end
 
 
-# function redraw(filename::AbstractString, dd::AbstractString, cwx, cwy, colonyx, colonyy; layout = TiledLayout("png"))
-
-# commonargs =
+function extractid(file_or_id::AbstractString)
+    t = splitext(file_or_id)
+    if t[2] == ""
+        # assume id
+        id = t[2]
+    else
+        id = idfromcolonyfilepath(file_or_id)
+    end
+    return id
+end
 
 """
     redraw(filename::AbstractString)
@@ -265,29 +277,23 @@ function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int, c
     shuffle::Bool = true,
     )
 
-    t = splitext(file_or_id)
-    if t[2] == ""
-        # assume id
-        id = t[2]
-        @debug "id=$id"
-    else
-        @debug "file_or_id=$file_or_id"
-        id = idfromcolonyfilepath(file_or_id)
-    end
+    id = extractid(file_or_id)
 
     # only look up the DB record if we have to
     if isnothing(mask) || isnothing(filter) || isnothing(seed)
-        @info "Searching for record with id='$id'"
+        @info "Searching for record with id='$id'..."
     # search for filename in archive DataFrame
     # open CSV archive file as a DataFrame
-        df = CSV.read(db_filename(); types=[String, String, String, String, String, String], header=DB_HEADERS, datarow=2, delim=',')
+        df = CSV.read(db_filename(); types=DB_ELTYPES, header=DB_HEADERS, datarow=2, delim=',')
         record = archiverowfromid(df,id)
         if first(size(record)) > 0
-            @debug "Recovered record" record
-
-            s = isnothing(seed) ? first(record[!, 3]) : seed
-            m = isnothing(mask) ? first(record[!, 4]) : mask
-            f = isnothing(filter) ? first(record[!, 5]) : filter
+            @info "Found record. Regenerating..." record
+            s = isnothing(seed) ? first(record[!, columnindex(df, :seed)]) : seed
+            m = isnothing(mask) ? first(record[!, columnindex(df, :mask)]) : mask
+            f = isnothing(filter) ? first(record[!, columnindex(df, :filter)]) : filter
+        else
+            println("Failed to find record for $(id)")
+            return nothing
         end
 
         seed::ColonySeed = eval(Meta.parse(s))
@@ -298,24 +304,26 @@ function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int, c
 
         filter::StateFilter = filterfromstring(f)
         @debug "Recovered filter=$filter"
-
-        if isnothing(layout)
-            layout = layoutforfile(filename)
-        end
-        @debug "layout = $(layout)"
-
-        if !isdir(destdir)
-            mkdir(destdir)
-        end
-
-        # call calculatecommonwealth
-        context = CommonwealthContext(cwx, cwy, colonyx, colonyy, mask, filter, seed, layout)
-        colonyres = buildimage(context)
-        img = colonyres.img
-        save_image_info(img,destdir,context,colonyres.repeats)
     else
-        @warn "Failed to find record for $(filename)"
+        @info "Regenerating with given mask, filter and seed..."
     end
+
+    if isnothing(layout)
+        layout = layoutforfile(filename)
+    end
+    @debug "layout = $(layout)"
+
+    if !isdir(destdir)
+        mkdir(destdir)
+    end
+
+    # call calculatecommonwealth
+    context = CommonwealthContext(cwx, cwy, colonyx, colonyy, mask, filter, seed, layout)
+    colonyres = buildimage(context)
+    img = colonyres.img
+    f = save_image_info(colonyres, destdir)
+    println("Saved image to $(f)")
+
 end
 
 function layoutforfile(filename::AbstractString)
@@ -390,14 +398,13 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
     if extremerandom
         # Generate all masks and all filters and iterate through pairs of (mask,filter)
         for p in zipperzapper(maskrange, maskdim, shuffle)
-            isnothing(mask) && (mm = p[1])
-            isnothing(filter) && (ff = p[2])
-            isnothing(seed) && (ss = ColonySeed(rand(1:3)))
+            mm = isnothing(mask) ? p[1] : mask
+            ff = isnothing(filter) ? p[2] : filter
+            ss = isnothing(seed) ? ColonySeed(rand(UnitRange(1,3))) : seed
             @debug "mask=$(mm), filter=$(ff), seed=$(ss)"
             context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout)
             colonyres = buildimage(context)
-            img, repeater = colonyres.img, colonyres.repeats
-            save_image_info(img, (repeater ? repeatfiledir : regfiledir), context, repeater)
+            save_image_info(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
             cnt += 1
             if limit > 0 && cnt >= limit
                 return cnt
@@ -406,29 +413,36 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
     else
         for mgen in generate_masks(maskrange, maskdim)
             # use the mask provided in the function argument if there is one
-            isnothing(mask) && (mm = mgen)
+            mm = isnothing(mask) ? mgen : mask
             fc = 0
             for fgen in generate_state_filters(shuffle)
                 # use the filter provided in the function argument if there is one
-                isnothing(filter) && (ff = fgen)
+                ff = isnothing(filter) ? fgen : filter
                 if fc > MAX_FILTER_COUNT
                     @info "Moving to the next mask..."
                     break
                 end
                 fc += 1
-                isnothing(seed) && (seed = ColonySeed(rand(1:3)))
-                @debug "mask=$(mm), filter=$(ff), seed=$(seed)"
-                context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, seed, layout)
-                colonyres = buildimage(context)
-                img, repeater = colonyres.img, colonyres.repeats
-                save_image_info(img, (repeater ? repeatfiledir : regfiledir), context, repeater)
-                cnt += 1
-                if limit > 0 && cnt >= limit
-                    return cnt
+                for i = 1:3
+                    if !isnothing(seed) && i > 1
+                        # we have already tried this seed, so move one
+                        break
+                    end
+                    ss = isnothing(seed) ? ColonySeed(i) : seed
+                    @debug "mask=$(mm), filter=$(ff), seed=$(ss)"
+                    context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout)
+                    colonyres = buildimage(context)
+                    f = save_image_info(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
+                    println("$f")
+                    cnt += 1
+                    if limit > 0 && cnt >= limit
+                        return cnt
+                    end
                 end
             end #next filter
         end# next mask
     end
+    println("Generated $(cnt) files.")
 end
 
 function regeneratebest(srcdir::AbstractString="img/best", destdir = "img/giant")
