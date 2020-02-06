@@ -26,7 +26,7 @@ function db_filename()
 end
 
 function create_save_dir(dirname::AbstractString, dirtype::AbstractString, mksubdir::Bool = true)
-    name = joinpath(dirname, dirtype, (mksubdir ? format(now(), HHMMSS_FORMAT) : ""))
+    name = joinpath(dirname, dirtype, (mksubdir ? Dates.format(now(), HHMMSS_FORMAT) : ""))
     if !isdir(name)
         mkpath(name)
     end

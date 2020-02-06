@@ -1,3 +1,5 @@
+module Colonies
+
 using Images
 using DataFrames
 using CSV
@@ -6,16 +8,21 @@ using Random
 using UUIDs
 using Colors
 
-# include("Filters.jl")
-# using .Filters
-# include("maskmod.jl")
-# using .Masks
+include("Filters.jl")
+using .Filters
+include("Masks.jl")
+using .Masks
 
 const MAX_FILTER_COUNT = 20
 @enum ColonySeed blank=1 square=2 random=3
 
-include("filtersnew.jl")
-include("masks.jl")
+export Mask, StateFilter, ColonySeed, TiledLayout, StackedLayout
+export redraw, generatemany, zipperzapper, reducedwithem, reducedwithmm, scanandredraw
+export generate_masks, generate_state_filter
+
+# include("filtersnew.jl")
+# include("masks.jl")
+
 
 abstract type CWLayout end
 
@@ -100,19 +107,44 @@ function get_rgb(val, switched::Bool)
     end
 end
 
-drawrepeatline!(img::Array, startpt::Tuple{Int,Int}, endpt::Tuple{Int,Int}; color=(1,0,0)) = setindex!(img, RGB(color), startpt[1]:endpt[1], startpt[2]:endpt[2])
-
-""" Return the result of applying an algorithm to the neighborhood and the mask.
-"""
-function calcreducedval(neighborhood, mask)
-    sum(mask) / max(sum(mask .* neighborhood),1.0)
+function drawrepeatline!(img::Array, startpt::Tuple{Int,Int}, endpt::Tuple{Int,Int}; color=(1,0,0))
+    setindex!(img, RGB(color), startpt[1]:endpt[1], startpt[2]:endpt[2])
 end
 
+function drawline!(img::AbstractArray{RGB{Float32}}, startpt::Tuple{Int,Int}, endpt::Tuple{Int,Int}, color = RGB{Float32}(0.,0.,0.))
+    img[first(startpt):first(endpt), last(startpt):last(endpt)] .= color
+    # setindex!(img, color, startpt[1]:endpt[1], startpt[2]:endpt[2])
+end
+
+function drawrepeatbox!(stack::AbstractArray, result::ColonyResult, color = RGB{Float32}(0.,1.,0.))
+    # colonies = result.colonies
+    repeats = result.repeats
+    idxs = result.repeatidx
+
+    if (repeats)
+        for (i,s) in enumerate(stack)
+            if i in idxs
+                @debug "s, before, from index $(i):" s
+                s[:,1:2] .= color
+                s[:,end-1:end] .= color
+                s[1:2,:] .= color
+                s[end-1:end,:] .= color
+                @debug "s, after" s
+            end
+        end
+    end
+    return stack
+end
+
+""" Reduces the mask and neighborhood to one float result
+"""
+reducedwithem(neighborhood::AbstractArray, mask::AbstractArray) = sum(mask) / max(sum(mask .* neighborhood),1.0)
+
 # What a difference a dot makes!
-reducedwithmm(neighborhood, mask) = sum(mask) / max(sum(mask * neighborhood), 1.0)
+reducedwithmm(neighborhood::AbstractArray, mask::AbstractArray) = sum(mask) / max(sum(mask * neighborhood), 1.0)
 
 # f(neighborhood, mask) = calcreducedval(neighborhood, mask)
-f(neighborhood, mask) = reducedwithmm(neighborhood, mask)
+f(neighborhood, mask) = reducedwithem(neighborhood, mask)
 
 # calculatenewcolony(colony::Array{T}, context::CommonwealthContext) where {T<:Number} = calculatenewcolony(f, colony, context)
 
@@ -203,17 +235,27 @@ end
 """
 Stack each NxN float array vertically (dim=3) and convert to grayscale.
 """
-function layoutimage(lo::StackedLayout, imgstack::Array, context::CommonwealthContext)
-    return Gray.(cat(imgstack[1:end]...,dims=3))
+function layoutimage(lo::StackedLayout, imgstack::Vector, context::CommonwealthContext)
+    return cat(imgstack[1:end]...,dims=3)
 end
 
 """
 Tile the images in the stack using parameters of the context and convert to grayscale.
 """
-function layoutimage(lo::TiledLayout, imgstack::Array, context::CommonwealthContext)
-    return Gray.(hvcat(context.ysize, imgstack[1:end]...))
+function layoutimage(lo::TiledLayout, imgstack::Vector, context::CommonwealthContext)
+    @debug "tiling stack of size $(size(imgstack)), eltype $(eltype(imgstack)), to depth $(context.ysize)"
+    return hvcat(context.ysize, imgstack[1:end]...)
 end
 
+function colorimage!(imgstack::Vector, result::ColonyResult)
+    resultstack = Array{RGB{Float32}}[]
+    for s in imgstack
+        @debug "before coloring img in stack is " s
+        push!(resultstack, RGB{Float32}.(Gray{Float32}.(s)))
+    end
+    drawrepeatbox!(resultstack, result)
+    return resultstack
+end
 
 """
 
@@ -233,6 +275,12 @@ function buildimage(context::CommonwealthContext)
     # First, convert each layer into a matrix of floats whose values {0, 1/3, 2/3, 1}
     # represent the four states of a cell. This will determine the cell's color.
     stack = map(c -> (c[:,:,1] .<< 1 .+ c[:,:,2]) .* 1/3, colonies)
+
+    @debug "stack has size $(size(stack)), eltype $(eltype(stack))"
+
+    stack = colorimage!(stack, colonyres)
+
+    @debug "after coloring, stack has size $(size(stack)), eltype $(eltype(stack))"
 
     layout = context.layout
     if isnothing(layout)
@@ -356,7 +404,8 @@ function scanandredraw(srcdir::AbstractString, destdir::AbstractString, cwx::Int
 end
 
 """
-Collects all StateFilters (~573120) and all Masks (3024), repeating
+Returns an iterator of (StateFilter, Mask) pairs. It does this by collecting
+all StateFilters (~573120) and all Masks (3024), repeating
 the mask vector as many times as needed in order to provide a result of
 one pair of (StateFilter, Mask) from the zip function iterator.
 """
@@ -406,6 +455,7 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
             colonyres = buildimage(context)
             save_image_info(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
             cnt += 1
+            println(cnt)
             if limit > 0 && cnt >= limit
                 return cnt
             end
@@ -435,6 +485,7 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
                     f = save_image_info(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
                     println("$f")
                     cnt += 1
+                    println(cnt)
                     if limit > 0 && cnt >= limit
                         return cnt
                     end
@@ -503,3 +554,4 @@ end
 # generatemany(commonwealth_x,commonwealth_y,colony_x,colony_y,scale_factor)
 # generatemany(5,5,50,50)
 # regeneratebest()
+end #module
