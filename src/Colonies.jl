@@ -7,24 +7,22 @@ using Query
 using Random
 using UUIDs
 using Colors
+using Reexport
 
 include("Filters.jl")
-using .Filters
+@reexport using .Filters
 include("Masks.jl")
-using .Masks
+@reexport using .Masks
 
-const MAX_FILTER_COUNT = 20
-@enum ColonySeed blank=1 square=2 random=3 randedge=4
-seedwith(x::ColonySeed) = ColonySeed(Int(x))
-
-export ColonySeed, TiledLayout, StackedLayout
+export ColonySeed
+export TiledLayout, StackedLayout, VideoLayout
 export redraw, generatemany, zipperzapper, reducedwithem, reducedwithmm
 export scanandredraw, info, seedwith
 export blank, square, random, randedge
 
-# include("filtersnew.jl")
-# include("masks.jl")
-
+const MAX_FILTER_COUNT = 20
+@enum ColonySeed blank=1 square=2 random=3 randedge=4
+seedwith(x::ColonySeed) = ColonySeed(Int(x))
 
 abstract type CWLayout end
 
@@ -250,6 +248,8 @@ function layoutimage(lo::StackedLayout, imgstack::Vector, context::CommonwealthC
     return cat(imgstack[1:end]...,dims=3)
 end
 
+layoutimage(lo::VideoLayout, imgstack::Vector, context::CommonwealthContext) = return imgstack
+
 """
 Tile the images in the stack using parameters of the context and convert to grayscale.
 """
@@ -258,7 +258,9 @@ function layoutimage(lo::TiledLayout, imgstack::Vector, context::CommonwealthCon
     return hvcat(context.ysize, imgstack[1:end]...)
 end
 
-function colorimage!(imgstack::Vector, result::ColonyResult)
+colorimage(imgstack::Vector, result::ColonyResult) = colorimage(result.context.layout, imgstack, result)
+
+function colorimage(layout::Union{TiledLayout,StackedLayout}, imgstack::Vector, result::ColonyResult)
     resultstack = Array{RGB{Float32}}[]
     for s in imgstack
         @debug "before coloring img in stack is " s
@@ -268,13 +270,22 @@ function colorimage!(imgstack::Vector, result::ColonyResult)
     return resultstack
 end
 
+function colorimage(layout::VideoLayout, imgstack::Vector, result::ColonyResult)
+    resultstack = Array{Gray{N0f8}}[]
+    for s in imgstack
+        @debug "before coloring, img in stack is " s
+        push!(resultstack, Gray{N0f8}.(s))
+    end
+    return resultstack
+end
+
 """
 
 """
 function buildimage(context::CommonwealthContext)
     # All the heavy lifting takes place in calculatecommonwealth
     colonyres = calculatecommonwealth(context)
-
+    layout = context.layout
     colonies = colonyres.colonies
     repeats = colonyres.repeats
     repeatidx = colonyres.repeatidx
@@ -289,9 +300,9 @@ function buildimage(context::CommonwealthContext)
 
     @debug "stack has size $(size(stack)), eltype $(eltype(stack))"
 
-    stack = colorimage!(stack, colonyres)
+    stack = colorimage(layout, stack, colonyres)
 
-    @debug "after coloring, stack has size $(size(stack)), eltype $(eltype(stack))"
+    @debug "after coloring, first image has size $(size(stack[1])), eltype $(eltype(stack[1]))"
 
     layout = context.layout
     if isnothing(layout)
@@ -310,13 +321,7 @@ end
 
 function extractid(file_or_id::AbstractString)
     t = splitext(file_or_id)
-    if t[2] == ""
-        # assume id
-        id = t[2]
-    else
-        id = idfromcolonyfilepath(file_or_id)
-    end
-    return id
+    return t[2] == "" ? t[1] : idfromcolonyfilepath(file_or_id)
 end
 
 """
@@ -333,7 +338,8 @@ function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int = 
     layout::CWLayout = TiledLayout("png"),
     maskrange::UnitRange{Int} = 1:4,
     maskdim::Int = 3,
-    shuffle::Bool = true
+    shuffle::Bool = true,
+    dbfile::Union{IO, AbstractString} = db_filename()
     )
 
     id = extractid(file_or_id)
@@ -343,7 +349,7 @@ function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int = 
         @info "Searching for record with id='$id'..."
     # search for filename in archive DataFrame
     # open CSV archive file as a DataFrame
-        df = CSV.read(db_filename(); types=DB_ELTYPES, header=DB_HEADERS, datarow=2, delim=',')
+        df = CSV.read(dbfile; types=DB_ELTYPES, header=DB_HEADERS, datarow=2, delim=',')
         record = archiverowfromid(df,id)
         if first(size(record)) > 0
             @info "Found record. Regenerating..." record
@@ -389,7 +395,7 @@ function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int = 
     context = CommonwealthContext(cwx, cwy, colx, coly, mask, filter, seed, layout)
     colonyres = buildimage(context)
     img = colonyres.img
-    f = save_image_info(colonyres, destdir)
+    f = saveimage(colonyres, destdir)
     println("Saved image to $(f)")
 
 end
@@ -473,7 +479,7 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
             @debug "mask=$(mm), filter=$(ff), seed=$(ss)"
             context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout)
             colonyres = buildimage(context)
-            save_image_info(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
+            saveimage(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
             cnt += 1
             println(cnt)
             if limit > 0 && cnt >= limit
@@ -502,7 +508,7 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
                     @debug "mask=$(mm), filter=$(ff), seed=$(ss)"
                     context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout)
                     colonyres = buildimage(context)
-                    f = save_image_info(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
+                    f = saveimage(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
                     println("$f")
                     cnt += 1
                     println(cnt)
@@ -564,7 +570,7 @@ function main(args::Array{String})
     # println("offsets are $offsets")
     # offsets = get_random_offsets((Int)(round(0.8*COMMONWEALTH_X*COMMONWEALTH_Y)))
     colonyres = buildimage(context)
-    save_image_info(colonyres.img, filedir, context, colonyres.repeats)
+    saveimage(colonyres.img, filedir, context, colonyres.repeats)
     @info "Done."
 end
 

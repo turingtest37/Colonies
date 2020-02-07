@@ -1,4 +1,6 @@
 using Dates
+using Images
+using VideoIO
 
 const DB_FILE_NAME = "colony4j2.csv"
 const DB_HEADERS = String["id","file","cwx","cwy","colx","coly","seed","mask","filter","repeater","repeatidx","layout"]
@@ -14,6 +16,19 @@ struct StackedLayout <: CWLayout
     ext::AbstractString
     StackedLayout() = new("gif")
 end
+
+struct VideoLayout <: CWLayout
+    ext::AbstractString
+    props::Vector
+    framerate::Int
+    VideoLayout(props, fr) = new("mp4", props, fr)
+end
+
+VideoLayout() = VideoLayout(24)
+
+VideoLayout(framerate::Int) = VideoLayout([
+                        :priv_data => ("crf"=>"0","preset"=>"ultrafast"),
+                        :color_range=>2], framerate)
 
 make_colony_id() = UUIDs.uuid1()
 
@@ -56,7 +71,9 @@ function archive_image_db(dbf::AbstractString; kwargs...)
     dbf
 end
 
-function save_image_info(result::ColonyResult, filedir::AbstractString)
+saveimage(result::ColonyResult, filedir::AbstractString) = saveimage(result.context.layout, result, filedir)
+
+function saveimage(layout::Union{TiledLayout, StackedLayout}, result::ColonyResult, filedir::AbstractString)
     context = result.context
     img = result.img
     seed = context.seed
@@ -66,6 +83,7 @@ function save_image_info(result::ColonyResult, filedir::AbstractString)
     id = make_colony_id()
     file = make_filename(id, filedir, layout.ext)
     @debug "Attempting to save image to $(file)"
+
     save(file, img)
 
     archive_image_db(db_filename();
@@ -88,6 +106,44 @@ function save_image_info(result::ColonyResult, filedir::AbstractString)
     return file
 end
 
+function saveimage(layout::VideoLayout, result::ColonyResult, filedir::AbstractString)
+    context = result.context
+    imgstack = result.img
+    seed = context.seed
+    mask = context.mask
+    filter = context.filter
+    layout = context.layout
+
+    id = make_colony_id()
+    filename = make_filename(id, filedir, layout.ext)
+
+    @debug "Attempting to save image of size $(size(imgstack)) to $(filename)"
+    @debug "imgstack eltype = $(eltype(imgstack))"
+
+    props = layout.props
+    fr = layout.framerate
+
+    encodevideo(filename,imgstack,framerate=fr,AVCodecContextProperties=props)
+
+    archive_image_db(db_filename();
+    :id => id,
+    :file => filename,
+    :cwx => context.xsize,
+    :cwy => context.ysize,
+    :colx => context.colx,
+    :coly => context.coly,
+    :seed => context.seed,
+    :mask => context.mask,
+    :filter => context.filter,
+    :repeater => result.repeats,
+    :repeatidx => (isnothing(result.repeatidx) ? string(Int[]) : string(result.repeatidx)),
+    :layout => context.layout
+    )
+
+    # archive_image_db(db_filename(),colony_id,colonyFileName,seed,mask,filter,repeater)
+    @debug "Saved image file $filename"
+    return filename
+end
 
 function idfromcolonyfilepath(filepath::AbstractString)
     basename = splitext(Base.Filesystem.basename(filepath))
