@@ -14,13 +14,13 @@ include("Masks.jl")
 using .Masks
 
 const MAX_FILTER_COUNT = 20
-@enum ColonySeed blank=1 square=2 random=3
+@enum ColonySeed blank=1 square=2 random=3 randedge=4
 seedwith(x::ColonySeed) = ColonySeed(Int(x))
 
 export ColonySeed, TiledLayout, StackedLayout
 export redraw, generatemany, zipperzapper, reducedwithem, reducedwithmm
 export scanandredraw, info, seedwith
-export blank, square, random
+export blank, square, random, randedge
 
 # include("filtersnew.jl")
 # include("masks.jl")
@@ -52,6 +52,7 @@ end
 
 include("persistence.jl")
 
+
 function initialize_colony(T::Type{<:Number}, xsize::Int, ysize::Int, seed::ColonySeed)
 
     # Ensure that xsize and ysize are positive ints > 1 before continuing
@@ -59,17 +60,29 @@ function initialize_colony(T::Type{<:Number}, xsize::Int, ysize::Int, seed::Colo
     @assert ysize > 1 "ysize must be 2 or greater."
 
     c = zeros(T, ysize, xsize, 2)
-    if seed==blank
+
+    if seed == blank
         c = ones(T, ysize, xsize, 2)
-    elseif seed==random
+    elseif seed == random
         c = rand(convert(T,0):convert(T,1), ysize, xsize, 2)
+    elseif seed == randedge
+        c = rand(convert(T,0):convert(T,1), ysize, xsize, 2)
+        c[2:end-2,2:end-2,:] .= 1
+    else
+        initsquare!(T, c, xsize, ysize)
     end
+    return c
+end
 
-    if seed != blank && seed != random && !isodd(ysize) && !isodd(xsize)
+function initsquare!(T::Type{<:Number}, c::AbstractArray, xsize::Int, ysize::Int)
+    y = round(T, ysize/2, RoundUp)
+    x = round(T, xsize/2, RoundUp)
+    y = round(T, ysize/2, RoundUp)
+    x = round(T, xsize/2, RoundUp)
+
+    # Square
+    if !isodd(ysize) && !isodd(xsize)
         # Even dimensions
-        y = round(T, ysize/2, RoundUp)
-        x = round(T, xsize/2, RoundUp)
-
         c[y-1,x-1,1]=convert(T, 1)
         c[y-1,x,1]  =convert(T, 1)
         c[y-1,x+1,1]=convert(T, 1)
@@ -83,12 +96,8 @@ function initialize_colony(T::Type{<:Number}, xsize::Int, ysize::Int, seed::Colo
         c[y+2,x+1,1]=convert(T, 1)
         c[y+2,x+2,1]=convert(T, 1)
 
-
-    elseif seed != blank && seed != random && (isodd(ysize) || isodd(xsize))
-        # Odd dimensions
-        y = round(Int, ysize/2, Base.RoundUp)
-        x = round(Int, xsize/2, Base.RoundUp)
-
+    else
+        # One or both axes has odd length
         c[y-1,x-1,1]=convert(T, 1)
         c[y-1,x,1]  =convert(T, 1)
         c[y-1,x+1,1]=convert(T, 1)
@@ -460,7 +469,7 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
         for p in zipperzapper(maskrange, maskdim, shuffle)
             mm = isnothing(mask) ? p[1] : mask
             ff = isnothing(filter) ? p[2] : filter
-            ss = isnothing(seed) ? ColonySeed(rand(UnitRange(1,3))) : seed
+            ss = isnothing(seed) ? ColonySeed(rand(UnitRange(1,4))) : seed
             @debug "mask=$(mm), filter=$(ff), seed=$(ss)"
             context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout)
             colonyres = buildimage(context)
@@ -484,7 +493,7 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
                     break
                 end
                 fc += 1
-                for i = 1:3
+                for i = 1:4
                     if !isnothing(seed) && i > 1
                         # we have already tried this seed, so move one
                         break
