@@ -15,10 +15,12 @@ using .Masks
 
 const MAX_FILTER_COUNT = 20
 @enum ColonySeed blank=1 square=2 random=3
+seedwith(x::ColonySeed) = ColonySeed(Int(x))
 
-export Mask, StateFilter, ColonySeed, TiledLayout, StackedLayout
-export redraw, generatemany, zipperzapper, reducedwithem, reducedwithmm, scanandredraw
-export generate_masks, generate_state_filter
+export ColonySeed, TiledLayout, StackedLayout
+export redraw, generatemany, zipperzapper, reducedwithem, reducedwithmm
+export scanandredraw, info, seedwith
+export blank, square, random
 
 # include("filtersnew.jl")
 # include("masks.jl")
@@ -29,8 +31,8 @@ abstract type CWLayout end
 mutable struct CommonwealthContext
     xsize::Int
     ysize::Int
-    colonyxsize::Int
-    colonyysize::Int
+    colx::Int
+    coly::Int
     mask::Union{Mask, Nothing}
     filter::Union{StateFilter, Nothing}
     seed::Union{ColonySeed, Nothing}
@@ -155,12 +157,12 @@ function calculatenewcolony(colony::Array{T}, context::CommonwealthContext) wher
     maskmat = mask.m
     filter = context.filter
     ctype = eltype(colony)
-    colonyysize, colonyxsize = size(colony)
+    coly, colx = size(colony)
 
     maskdepth = div(size(maskmat, 1), 2)
 
     # create a blank target colony
-    new_colony = initialize_colony(ctype, colonyxsize, colonyysize, blank)
+    new_colony = initialize_colony(ctype, colx, coly, blank)
 
     mini = minj = 1 + maskdepth
     maxi = size(colony, 2) - maskdepth
@@ -196,13 +198,13 @@ end
 function calculatecommonwealth(context::CommonwealthContext)
     xsize = context.xsize
     ysize = context.ysize
-    colonyxsize = context.colonyxsize
-    colonyysize = context.colonyysize
+    colx = context.colx
+    coly = context.coly
     mask = context.mask
     filter = context.filter
     seed = context.seed
 
-    colony = initialize_colony(Int, colonyxsize, colonyysize, seed)
+    colony = initialize_colony(Int, colx, coly, seed)
     colonies = Array{Int}[]
     # load the first colony into the history buffer
     push!(colonies, colony)
@@ -315,14 +317,14 @@ end
     and attempt to re
 
 """
-function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int, cwy::Int, colonyx::Int, colonyy::Int;
-    mask::Union{Mask,Nothing} = nothing,
-    filter::Union{StateFilter,Nothing} = nothing,
-    seed::Union{ColonySeed,Nothing} = nothing,
+function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int = -1, cwy::Int = -1, colx::Int = -1, coly::Int = -1;
+    mask::Union{Mask, Nothing} = nothing,
+    filter::Union{StateFilter, Nothing} = nothing,
+    seed::Union{ColonySeed, Nothing} = nothing,
     layout::CWLayout = TiledLayout("png"),
     maskrange::UnitRange{Int} = 1:4,
     maskdim::Int = 3,
-    shuffle::Bool = true,
+    shuffle::Bool = true
     )
 
     id = extractid(file_or_id)
@@ -336,6 +338,10 @@ function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int, c
         record = archiverowfromid(df,id)
         if first(size(record)) > 0
             @info "Found record. Regenerating..." record
+            cwx = cwx < 0 ? first(record[!, columnindex(df, :cwx)]) : cwx
+            cwy = cwy < 0 ? first(record[!, columnindex(df, :cwy)]) : cwy
+            colx = colx < 0 ? first(record[!, columnindex(df, :colx)]) : colx
+            coly = coly < 0 ? first(record[!, columnindex(df, :coly)]) : coly
             s = isnothing(seed) ? first(record[!, columnindex(df, :seed)]) : seed
             m = isnothing(mask) ? first(record[!, columnindex(df, :mask)]) : mask
             f = isnothing(filter) ? first(record[!, columnindex(df, :filter)]) : filter
@@ -343,15 +349,20 @@ function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int, c
             println("Failed to find record for $(id)")
             return nothing
         end
+        if s isa AbstractString
+            seed = eval(Meta.parse(s))
+            @debug "Recovered seed=$seed"
+        end
 
-        seed::ColonySeed = eval(Meta.parse(s))
-        @debug "Recovered seed=$seed"
+        if m isa AbstractString
+            mask = maskfromstring(m)
+            @debug "Recovered mask=$mask"
+        end
 
-        mask::Mask = maskfromstring(m)
-        @debug "Recovered mask=$mask"
-
-        filter::StateFilter = filterfromstring(f)
-        @debug "Recovered filter=$filter"
+        if f isa AbstractString
+            filter::StateFilter = filterfromstring(f)
+            @debug "Recovered filter=$filter"
+        end
     else
         @info "Regenerating with given mask, filter and seed..."
     end
@@ -366,7 +377,7 @@ function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int, c
     end
 
     # call calculatecommonwealth
-    context = CommonwealthContext(cwx, cwy, colonyx, colonyy, mask, filter, seed, layout)
+    context = CommonwealthContext(cwx, cwy, colx, coly, mask, filter, seed, layout)
     colonyres = buildimage(context)
     img = colonyres.img
     f = save_image_info(colonyres, destdir)
@@ -387,7 +398,7 @@ end
 
 
 """
-function scanandredraw(srcdir::AbstractString, destdir::AbstractString, cwx::Int, cwy::Int, colonyx::Int, colonyy::Int)
+function scanandredraw(srcdir::AbstractString, destdir::AbstractString, cwx::Int, cwy::Int, colx::Int, coly::Int)
     sd = srcdir
     dd = destdir
     if !isdir(dd)
@@ -399,7 +410,7 @@ function scanandredraw(srcdir::AbstractString, destdir::AbstractString, cwx::Int
     ls = readdir(sd)
     for filename in ls
         startswith(filename,'.') ? continue : nothing
-        redraw(filename, destdir, cwx, cwy, colonyx, colonyy)
+        redraw(filename, destdir, cwx, cwy, colx, coly)
     end
 end
 
@@ -500,14 +511,14 @@ function regeneratebest(srcdir::AbstractString="img/best", destdir = "img/giant"
 
     xsize=25
     ysize=16
-    colonyxsize = 100
-    colonyysize = 100
+    colxsize = 100
+    coly = 100
     scalef = 2
     mask = Union{Mask, Nothing}()
     filter = Union{Mask, Nothing}()
     seed = Union{Mask, Nothing}()
     layout = TiledLayout("png")
-    context = CommonwealthContext(xsize,ysize,colonyxsize,colonyysize,mask,filter,seed,layout)
+    context = CommonwealthContext(xsize,ysize,colxsize,coly,mask,filter,seed,layout)
 
     scanandredraw(srcdir, destdir, context)
 end
@@ -526,19 +537,19 @@ function main(args::Array{String})
     # println("Filter=$filter")
     xsize::Int = eval(parse(args[3]))
     ysize::Int = eval(parse(args[4]))
-    colonyxsize::Int = eval(parse(args[5]))
-    colonyysize::Int = eval(parse(args[6]))
+    colx::Int = eval(parse(args[5]))
+    coly::Int = eval(parse(args[6]))
     scalef::Int = eval(parse(args[7]))
     seed::ColonySeed = eval(parse(args[8]))
     drawrepeatline::Bool = eval(parse(args[9]))
 
-    img = create_drawing_context(xsize, ysize, colonyxsize, colonyysize, scalef)
+    img = create_drawing_context(xsize, ysize, colx, coly, scalef)
 
-    offsets = normal_offsets(xsize, ysize, colonyxsize, colonyysize)
+    offsets = normal_offsets(xsize, ysize, colx, coly)
 
     layout = TiledLayout("png")
 
-    context = CommonwealthContext(xsize, ysize, colonyxsize, colonyysize, mask, filter, seed, layout)
+    context = CommonwealthContext(xsize, ysize, colx, coly, mask, filter, seed, layout)
 
     filedir = create_save_dir(filter)
     # println("offsets are $offsets")

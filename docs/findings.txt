@@ -1,0 +1,6 @@
+Proposed axiom:
+
+If a single Mask/Filter combination producs a cycle using one seed, it will produce a cycle using all seeds.
+
+
+
