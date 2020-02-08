@@ -1,5 +1,6 @@
 using Plots
 using Random
+using Images
 
 include("Colonies.jl")
 import .Colonies
@@ -40,3 +41,14 @@ end
 
 
 # explore(1:4, 3, true)
+function splice(src1...)
+    a = Array{RGB}[]
+
+    for f in src1
+        img = open(f)
+        a = vcat(a, img)
+    end
+
+end
+
+img = load(filename)

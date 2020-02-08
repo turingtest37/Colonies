@@ -8,6 +8,9 @@ using Random
 using UUIDs
 using Colors
 using Reexport
+using Dates
+using VideoIO
+
 
 include("Filters.jl")
 @reexport using .Filters
@@ -19,6 +22,9 @@ export TiledLayout, StackedLayout, VideoLayout
 export redraw, generatemany, zipperzapper, reducedwithem, reducedwithmm
 export scanandredraw, info, seedwith
 export blank, square, random, randedge
+
+# for testing only
+export extractid
 
 const MAX_FILTER_COUNT = 20
 @enum ColonySeed blank=1 square=2 random=3 randedge=4
@@ -319,11 +325,6 @@ function buildimage(context::CommonwealthContext)
 end
 
 
-function extractid(file_or_id::AbstractString)
-    t = splitext(file_or_id)
-    return t[2] == "" ? t[1] : idfromcolonyfilepath(file_or_id)
-end
-
 """
     redraw(filename::AbstractString)
 
@@ -352,7 +353,8 @@ function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int = 
         df = CSV.read(dbfile; types=DB_ELTYPES, header=DB_HEADERS, datarow=2, delim=',')
         record = archiverowfromid(df,id)
         if first(size(record)) > 0
-            @info "Found record. Regenerating..." record
+            @info "Found record. Regenerating..."
+            show(record, allcols=true)
             cwx = cwx < 0 ? first(record[!, columnindex(df, :cwx)]) : cwx
             cwy = cwy < 0 ? first(record[!, columnindex(df, :cwy)]) : cwy
             colx = colx < 0 ? first(record[!, columnindex(df, :colx)]) : colx

@@ -1,6 +1,3 @@
-using Dates
-using Images
-using VideoIO
 
 const DB_FILE_NAME = "colony4j2.csv"
 const DB_HEADERS = String["id","file","cwx","cwy","colx","coly","seed","mask","filter","repeater","repeatidx","layout"]
@@ -24,7 +21,7 @@ struct VideoLayout <: CWLayout
     VideoLayout(props, fr) = new("mp4", props, fr)
 end
 
-VideoLayout() = VideoLayout(24)
+VideoLayout() = VideoLayout(6)
 
 VideoLayout(framerate::Int) = VideoLayout([
                         :priv_data => ("crf"=>"0","preset"=>"ultrafast"),
@@ -36,9 +33,10 @@ make_filename(id, filedir, ext="png") = joinpath(filedir,string("colony4j-$id.",
 
 make_filename(filedir) = make_filename(filedir,rand(1:1000000))
 
-function db_filename()
-    return DB_FILE_NAME
-end
+"""
+Overload this to provide a different DB file name.
+"""
+db_filename() = DB_FILE_NAME
 
 function create_save_dir(dirname::AbstractString, dirtype::AbstractString, mksubdir::Bool = true)
     name = joinpath(dirname, dirtype, (mksubdir ? Dates.format(now(), HHMMSS_FORMAT) : ""))
@@ -49,11 +47,13 @@ function create_save_dir(dirname::AbstractString, dirtype::AbstractString, mksub
 end
 
 create_save_dir(dirname::AbstractString, rndname::Bool) = create_save_dir(dirname, "", rndname)
+
 create_save_dir(dirtype::AbstractString) = create_save_dir("img", dirtype, true)
 
+"""
+Stores metadata about the image as a dataframe in a CSV file.
+"""
 function archive_image_db(dbf::AbstractString; kwargs...)
-    # (k,v)
-    # S = :([Symbol(s)=", $(s)" for s in DB_HEADERS])
     @debug "Saving image with args" kwargs
     df = DataFrame(kwargs...)
     @debug "Here she is..." df
@@ -73,6 +73,10 @@ end
 
 saveimage(result::ColonyResult, filedir::AbstractString) = saveimage(result.context.layout, result, filedir)
 
+"""
+Stores the image that is encapsulated in the ColonyResult object,
+using the given layout (TiledLayout | StackedLayout).
+"""
 function saveimage(layout::Union{TiledLayout, StackedLayout}, result::ColonyResult, filedir::AbstractString)
     context = result.context
     img = result.img
@@ -105,6 +109,7 @@ function saveimage(layout::Union{TiledLayout, StackedLayout}, result::ColonyResu
     @debug "Saved image file $file"
     return file
 end
+
 
 function saveimage(layout::VideoLayout, result::ColonyResult, filedir::AbstractString)
     context = result.context
@@ -150,6 +155,12 @@ function idfromcolonyfilepath(filepath::AbstractString)
     re = match(ID_REGEX,basename[1])
     return re[1]
 end
+
+function extractid(file_or_id::AbstractString)
+    t = splitext(file_or_id)
+    return t[2] == "" ? t[1] : idfromcolonyfilepath(file_or_id)
+end
+
 
 function archiverowfromid(df::DataFrame, id::AbstractString)
     @from i in df begin
