@@ -33,32 +33,16 @@ mutable struct FilterIterator
     state::FilterState
 end
 
-# It will be a miracle if this works.
-# function Base.length(iter::FilterIterator)
-#
-#     res = []
-#     t = Base.iterate(iter)
-#     while t != nothing
-#         v,s = t[1],t[2]
-#         push!(res, v)
-#         t = Base.iterate(iter, s)
-#     end
-#     Base.length(res)
-#
-#     # # 500000
-#     # ilist = Any[]
-#     # for f in (iter.i1, iter.i2, iter.i3, iter.i4, iter.coeff_i, iter.bucket_i)
-#     #     !isnothing(f) && push!(ilist, f)
-#     # end
-#     # @debug "ilist" ilist
-#     #
-#     # foldr(*, (Base.length(f) for f in ilist), init=1)
-# end
-
 struct StateFilter
     d::Dict{Int64,Function}
 end
 
+StateFilter(s::AbstractString) = filterfromstring(s)
+
+"""
+All the permutations of 10 objects taken 4 different
+ways with
+"""
 function bucketcoeffs()
      return [7 1 1 1;
             6 2 1 1;
@@ -110,11 +94,12 @@ function Base.iterate(iter::FilterIterator)
     end
 end
 
+
 function buildresult(buckets)
-    od = Dict{Int,Function}(x => of for x::Int in buckets[1])
-    zd = Dict{Int,Function}(x => zf for x::Int in buckets[2])
-    sad = Dict{Int,Function}(x => saf for x::Int in buckets[3])
-    swd = Dict{Int,Function}(x => swf for x::Int in buckets[4])
+    od = Dict{Int,Function}(x => of for x in buckets[1])
+    zd = Dict{Int,Function}(x => zf for x in buckets[2])
+    sad = Dict{Int,Function}(x => saf for x in buckets[3])
+    swd = Dict{Int,Function}(x => swf for x in buckets[4])
     return merge(od,zd,sad,swd)
 end
 
@@ -253,8 +238,8 @@ function generate_state_filters(isshuffled::Bool = false)
     @info "Generating state filters..."
 
     buckets = [Int[], Int[], Int[], Int[]]
-    s1, s2, s3, s4 = nothing, nothing, nothing, nothing
-    fi1,fi2,fi3,fi4 = nothing, nothing, nothing, nothing
+    s1 = s2 = s3 = s4 = nothing
+    fi1 = fi2 = fi3 = fi4 = nothing
     bucket_i = nothing
     bi_state = nothing
 
