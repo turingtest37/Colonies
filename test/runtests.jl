@@ -8,3 +8,8 @@ using Colonies
     @test extractid("colony-123-456.png") == "123-456"
 
 end
+
+@testset "Many" begin
+    
+
+end

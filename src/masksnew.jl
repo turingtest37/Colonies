@@ -10,7 +10,7 @@ const MIRRH=@SMatrix [-1 0;0 1]
 const MIRRXY=@SMatrix [-0.5 0.5; 0.5 -0.5]
 const MIRRX_Y=@SMatrix [-0.5 -0.5;-0.5 -0.5]
 
-rng = Random.RandomDevice()
+Random.seed!(2314)
 
 mutable struct MaskIter{T,TT}
     i::T
@@ -31,7 +31,7 @@ function generate_coord_pairs(dim::Int = 5)
     matching_pairs = [Int[i,i] for i = -n:n]
     non_matching_pairs = collect(permutations(-n:n, 2))
     pairs = vcat(matching_pairs, non_matching_pairs)
-    shuffle(rng, pairs)
+    shuffle(pairs)
 end
 
 
@@ -131,6 +131,7 @@ end
 
 Base.length(iter::MaskIter) = Base.length(iter.i)
 Base.eltype(::Type{MaskIter}) = Mask
+Base.:*(mask::Mask, A::AbstractArray) = *(mask.m, A)
 
 """Returns an iterator of square, weighted masks.
 """
@@ -143,7 +144,7 @@ end
 # Returns a 2-D array of weight values, one for each member of a neighborhood
 function generate_weights(weightrange::UnitRange{Int}, dim::Int)
 
-    rweights = rand(rng, weightrange, dim * dim)
+    rweights = rand(weightrange, dim * dim)
     @debug "rweights=$(rweights)"
 
     weightsets = Dict{Int,Tuple}([

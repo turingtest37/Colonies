@@ -3,7 +3,8 @@ using Random
 using Images
 
 include("Colonies.jl")
-import .Colonies
+using .Colonies
+import Colonies.reduce
 
 
 function explore(maskrange, maskdim, shuffle, limit = 100)
@@ -51,4 +52,4 @@ function splice(src1...)
 
 end
 
-img = load(filename)
+Colonies.reduce(neighborhood, mask) = mod(mask * neighborhood, 9)

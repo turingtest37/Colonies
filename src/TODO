@@ -13,4 +13,8 @@ generatemany options for max # of filters and masks to try before changing
 
 Convert colony4j.csv into a real database. Maybe SQLLite???? Look into this!
 
+Add support for user-supplied "reduce" functions that get the neighborhood (always centered on the current point), mask and filter as arguments
+
+
+
 

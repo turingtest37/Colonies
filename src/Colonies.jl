@@ -10,7 +10,9 @@ using Colors
 using Reexport
 using Dates
 using VideoIO
+using LinearAlgebra
 
+import Base: *
 
 include("Filters.jl")
 @reexport using .Filters
@@ -22,6 +24,7 @@ export TiledLayout, StackedLayout, VideoLayout
 export redraw, generatemany, zipperzapper, reducedwithem, reducedwithmm
 export scanandredraw, info, seedwith
 export blank, square, random, randedge
+export reduce
 
 # for testing only
 export extractid
@@ -29,6 +32,8 @@ export extractid
 const MAX_FILTER_COUNT = 20
 @enum ColonySeed blank=1 square=2 random=3 randedge=4
 seedwith(x::ColonySeed) = ColonySeed(Int(x))
+
+const DEFAULT_REDUCE_FUNC = Meta.parse("reducewrank(neighborhood, mask)")
 
 abstract type CWLayout end
 
@@ -41,6 +46,7 @@ mutable struct CommonwealthContext
     filter::Union{StateFilter, Nothing}
     seed::Union{ColonySeed, Nothing}
     layout::Union{CWLayout, Nothing}
+    reducef::Function
     # CommonwealthContext(nbx::Int, nby::Int, colonyx::Int, colonyy::Int, seed::ColonySeed=blank) = new(nbx,nby,colonyx,colonyy,nothing,nothing,seed)
 end
 
@@ -158,8 +164,14 @@ reducedwithem(neighborhood::AbstractArray, mask::AbstractArray) = sum(mask) / ma
 # What a difference a dot makes!
 reducedwithmm(neighborhood::AbstractArray, mask::AbstractArray) = sum(mask) / max(sum(mask * neighborhood), 1.0)
 
+"""
+Returns the rank of the matrix multiplication of mask x neighborhood.
+"""
+reducewrank(neighborhood::AbstractArray, mask::AbstractArray) = LinearAlgebra.rank(mask * neighborhood)
+
 # f(neighborhood, mask) = calcreducedval(neighborhood, mask)
-f(neighborhood, mask) = reducedwithem(neighborhood, mask)
+reduce(neighborhood::AbstractArray, mask::Mask, filter::StateFilter) = reducedwrank(neighborhood, mask)
+
 
 # calculatenewcolony(colony::Array{T}, context::CommonwealthContext) where {T<:Number} = calculatenewcolony(f, colony, context)
 
@@ -171,6 +183,7 @@ function calculatenewcolony(colony::Array{T}, context::CommonwealthContext) wher
     filter = context.filter
     ctype = eltype(colony)
     coly, colx = size(colony)
+    f = context.reducef
 
     maskdepth = div(size(maskmat, 1), 2)
 
@@ -188,11 +201,16 @@ function calculatenewcolony(colony::Array{T}, context::CommonwealthContext) wher
             jlims && continue
 
             neighborhood = view(colony, j-maskdepth:j+maskdepth, i-maskdepth:i+maskdepth, 1)
-            # @debug "neighborhood = $(neighborhood)"
-            reduced_val = f(neighborhood, maskmat)
-            # @debug "Reduced val = $(reduced_val)"
+            @debug "neighborhood = $(neighborhood)"
+            @debug "mask = $(mask)"
+            @debug "reducef :" reducef
+
+            reduced_val = f(maskmat, neighborhood, filter)
+
             # @debug "reduced_val = $(reduced_val)"
-            reduced_val = round(ctype, reduced_val, Base.RoundDown)
+            if !(typeof(reduced_val) <: Integer)
+                reduced_val = round(ctype, reduced_val, Base.RoundDown)
+            end
             # @debug "Reduced val is now = $(reduced_val)"
 
             if haskey(filter.d, reduced_val)
@@ -216,20 +234,22 @@ function calculatecommonwealth(context::CommonwealthContext)
     mask = context.mask
     filter = context.filter
     seed = context.seed
+    colonies = Array{Int}[]
 
     colony = initialize_colony(Int, colx, coly, seed)
-    colonies = Array{Int}[]
+
     # load the first colony into the history buffer
     push!(colonies, colony)
 
     repeater = false
     # Number of colonies in a commonwealth
-    cwcnt = xsize*ysize
+    cwcnt = xsize * ysize
     # println("xsize=$xsize, ysize=$ysize, offsets=$(size(offsets))")
     idxs = Int[]
     for i in 2:cwcnt
         new_colony = calculatenewcolony(colony, context)
         # repeater = in(new_colony, colonies)
+        # this next line is quite expensive; can it be speeded up?
         idx = first(indexin([new_colony], colonies))
         if idx != nothing
             idx = first(idx)
@@ -289,9 +309,10 @@ end
 
 """
 function buildimage(context::CommonwealthContext)
+
     # All the heavy lifting takes place in calculatecommonwealth
     colonyres = calculatecommonwealth(context)
-    layout = context.layout
+    # And here are the results...
     colonies = colonyres.colonies
     repeats = colonyres.repeats
     repeatidx = colonyres.repeatidx
@@ -306,7 +327,7 @@ function buildimage(context::CommonwealthContext)
 
     @debug "stack has size $(size(stack)), eltype $(eltype(stack))"
 
-    stack = colorimage(layout, stack, colonyres)
+    stack = colorimage(stack, colonyres)
 
     @debug "after coloring, first image has size $(size(stack[1])), eltype $(eltype(stack[1]))"
 
@@ -315,12 +336,10 @@ function buildimage(context::CommonwealthContext)
         layout = TiledLayout("png")
     end
 
-    img = layoutimage(layout, stack, context)
-    @debug "layed out image has size $(size(img))"
+    colonyres.img = layoutimage(layout, stack, context)
+    @debug "layed out image has size $(size(colonyres.img))"
     # stack each NxN float array vertically (dim=3) and convert to grayscale
 
-    # Add the image to the result object
-    colonyres.img = img
     return colonyres
 end
 
@@ -336,6 +355,7 @@ function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int = 
     mask::Union{Mask, Nothing} = nothing,
     filter::Union{StateFilter, Nothing} = nothing,
     seed::Union{ColonySeed, Nothing} = nothing,
+    reducef::Expr = Meta.parse("reducewrank(neighborhood, mask)"),
     layout::CWLayout = TiledLayout("png"),
     maskrange::UnitRange{Int} = 1:4,
     maskdim::Int = 3,
@@ -394,7 +414,7 @@ function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int = 
     end
 
     # call calculatecommonwealth
-    context = CommonwealthContext(cwx, cwy, colx, coly, mask, filter, seed, layout)
+    context = CommonwealthContext(cwx, cwy, colx, coly, mask, filter, seed, reducef, layout)
     colonyres = buildimage(context)
     img = colonyres.img
     f = saveimage(colonyres, destdir)
@@ -454,6 +474,7 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
     mask::Union{Mask,Nothing} = nothing,
     filter::Union{StateFilter,Nothing} = nothing,
     seed::Union{ColonySeed,Nothing} = nothing,
+    reducef::Function = (m,n,f)->rank(m * n),
     layout::CWLayout = TiledLayout("png"),
     maskrange::UnitRange{Int} = 1:4,
     maskdim::Int = 3,
@@ -478,15 +499,16 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
             mm = isnothing(mask) ? p[1] : mask
             ff = isnothing(filter) ? p[2] : filter
             ss = isnothing(seed) ? ColonySeed(rand(UnitRange(1,4))) : seed
-            @debug "mask=$(mm), filter=$(ff), seed=$(ss)"
-            context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout)
+            @debug "mask=$(mm), filter=$(ff), seed=$(ss), reducef=$(reducef)"
+            context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout, reducef)
             colonyres = buildimage(context)
             saveimage(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
             cnt += 1
-            println(cnt)
             if limit > 0 && cnt >= limit
                 return cnt
             end
+            # Keep this after the test to only print 1-(n-1).
+            println(cnt)
         end
     else
         for mgen in generate_masks(maskrange, maskdim)
@@ -508,15 +530,15 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
                     end
                     ss = isnothing(seed) ? ColonySeed(i) : seed
                     @debug "mask=$(mm), filter=$(ff), seed=$(ss)"
-                    context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout)
+                    context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout, reducef)
                     colonyres = buildimage(context)
-                    f = saveimage(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
-                    println("$f")
+                    imgf = saveimage(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
+                    println("$imgf")
                     cnt += 1
-                    println(cnt)
                     if limit > 0 && cnt >= limit
                         return cnt
                     end
+                    println(cnt)
                 end
             end #next filter
         end# next mask
