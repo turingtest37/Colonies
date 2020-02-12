@@ -355,7 +355,7 @@ function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int = 
     mask::Union{Mask, Nothing} = nothing,
     filter::Union{StateFilter, Nothing} = nothing,
     seed::Union{ColonySeed, Nothing} = nothing,
-    reducef::Expr = Meta.parse("reducewrank(neighborhood, mask)"),
+    reducef::Function = (m,n,f)->rank(m * n),
     layout::CWLayout = TiledLayout("png"),
     maskrange::UnitRange{Int} = 1:4,
     maskdim::Int = 3,
@@ -414,7 +414,7 @@ function redraw(file_or_id::AbstractString, destdir::AbstractString, cwx::Int = 
     end
 
     # call calculatecommonwealth
-    context = CommonwealthContext(cwx, cwy, colx, coly, mask, filter, seed, reducef, layout)
+    context = CommonwealthContext(cwx, cwy, colx, coly, mask, filter, seed, layout, reducef)
     colonyres = buildimage(context)
     img = colonyres.img
     f = saveimage(colonyres, destdir)
@@ -502,13 +502,14 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
             @debug "mask=$(mm), filter=$(ff), seed=$(ss), reducef=$(reducef)"
             context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout, reducef)
             colonyres = buildimage(context)
-            saveimage(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
+            imgf = saveimage(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
+            println(cnt,"-",imgf,(colonyres.repeats ? " *" : ""))
             cnt += 1
-            if limit > 0 && cnt >= limit
+            if limit > 0 && cnt > limit
                 return cnt
             end
             # Keep this after the test to only print 1-(n-1).
-            println(cnt)
+            # println(cnt)
         end
     else
         for mgen in generate_masks(maskrange, maskdim)
@@ -533,17 +534,15 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
                     context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout, reducef)
                     colonyres = buildimage(context)
                     imgf = saveimage(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
-                    println("$imgf")
+                    println(cnt,"-",imgf,(colonyres.repeats ? " *" : ""))
                     cnt += 1
-                    if limit > 0 && cnt >= limit
+                    if limit > 0 && cnt > limit
                         return cnt
                     end
-                    println(cnt)
                 end
             end #next filter
         end# next mask
     end
-    println("Generated $(cnt) files.")
 end
 
 function regeneratebest(srcdir::AbstractString="img/best", destdir = "img/giant")
@@ -562,46 +561,4 @@ function regeneratebest(srcdir::AbstractString="img/best", destdir = "img/giant"
     scanandredraw(srcdir, destdir, context)
 end
 
-function main(args::Array{String})
-
-    if length(args) < 9
-        println("Usage: julia coloniesX.jl <mask> <filter> <xsize> <ysize> <colony_x> <colony_y> <scale_factor> <seed:blank|square|random> <draw_repeat_line:true|false>")
-        exit(1)
-    end
-    println("Calculating with arguments $args")
-
-    mask = maskfromstring(args[1])
-    filter = filterfromstring(args[2])
-    # println("ARGS[2]=$(args[2])")
-    # println("Filter=$filter")
-    xsize::Int = eval(parse(args[3]))
-    ysize::Int = eval(parse(args[4]))
-    colx::Int = eval(parse(args[5]))
-    coly::Int = eval(parse(args[6]))
-    scalef::Int = eval(parse(args[7]))
-    seed::ColonySeed = eval(parse(args[8]))
-    drawrepeatline::Bool = eval(parse(args[9]))
-
-    img = create_drawing_context(xsize, ysize, colx, coly, scalef)
-
-    offsets = normal_offsets(xsize, ysize, colx, coly)
-
-    layout = TiledLayout("png")
-
-    context = CommonwealthContext(xsize, ysize, colx, coly, mask, filter, seed, layout)
-
-    filedir = create_save_dir(filter)
-    # println("offsets are $offsets")
-    # offsets = get_random_offsets((Int)(round(0.8*COMMONWEALTH_X*COMMONWEALTH_Y)))
-    colonyres = buildimage(context)
-    saveimage(colonyres.img, filedir, context, colonyres.repeats)
-    @info "Done."
-end
-
-
-# CLIENT CODE STARTS HERE
-# main(Base.ARGS)
-# generatemany(commonwealth_x,commonwealth_y,colony_x,colony_y,scale_factor)
-# generatemany(5,5,50,50)
-# regeneratebest()
 end #module
