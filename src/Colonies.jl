@@ -482,14 +482,8 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
     destdir::Union{AbstractString,Nothing} = nothing
     )
 
-    if isnothing(destdir)
-        regfiledir = create_save_dir("regular")
-        repeatfiledir = create_save_dir("repeat")
-    else
-        if !isdir(destdir)
-            mkpath(destdir)
-        end
-        regfiledir = repeatfiledir = destdir
+    if !isnothing(destdir) && !isdir(destdir)
+        mkpath(destdir)
     end
 
     cnt = 0
@@ -502,11 +496,11 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
             @debug "mask=$(mm), filter=$(ff), seed=$(ss), reducef=$(reducef)"
             context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout, reducef)
             colonyres = buildimage(context)
-            imgf = saveimage(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
+            imgf = saveimage(colonyres)
             println(cnt,"-",imgf,(colonyres.repeats ? " *" : ""))
             cnt += 1
             if limit > 0 && cnt > limit
-                return cnt
+                return
             end
             # Keep this after the test to only print 1-(n-1).
             # println(cnt)
@@ -526,18 +520,18 @@ function generatemany(cwx::Int, cwy::Int, colony_x::Int, colony_y::Int, extremer
                 fc += 1
                 for i = 1:4
                     if !isnothing(seed) && i > 1
-                        # we have already tried this seed, so move one
+                        # we have already tried this seed, so move on
                         break
                     end
                     ss = isnothing(seed) ? ColonySeed(i) : seed
                     @debug "mask=$(mm), filter=$(ff), seed=$(ss)"
                     context = CommonwealthContext(cwx, cwy, colony_x, colony_y, mm, ff, ss, layout, reducef)
                     colonyres = buildimage(context)
-                    imgf = saveimage(colonyres, (colonyres.repeats ? repeatfiledir : regfiledir))
+                    imgf = saveimage(colonyres)
                     println(cnt,"-",imgf,(colonyres.repeats ? " *" : ""))
                     cnt += 1
                     if limit > 0 && cnt > limit
-                        return cnt
+                        return
                     end
                 end
             end #next filter

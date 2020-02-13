@@ -73,26 +73,32 @@ end
 
 saveimage(result::ColonyResult, filedir::AbstractString) = saveimage(result.context.layout, result, filedir)
 
+saveimage(result::ColonyResult) = saveimage(result.context.layout, result, create_save_dir("img",(result.repeats ? "repeat" : "regular"),true))
+
 """
 Stores the image that is encapsulated in the ColonyResult object,
 using the given layout (TiledLayout | StackedLayout).
 """
 function saveimage(layout::Union{TiledLayout, StackedLayout}, result::ColonyResult, filedir::AbstractString)
-    context = result.context
+    repeats = result.repeats
     img = result.img
+    context = result.context
+
     seed = context.seed
     mask = context.mask
     filter = context.filter
     layout = context.layout
-    id = make_colony_id()
-    file = make_filename(id, filedir, layout.ext)
-    @debug "Attempting to save image to $(file)"
 
-    save(file, img)
+    id = make_colony_id()
+
+    filename = make_filename(id, filedir, layout.ext)
+    @debug "Attempting to save image to $(filename)"
+
+    save(filename, img)
 
     archive_image_db(db_filename();
     :id => id,
-    :file => file,
+    :file => filename,
     :cwx => context.xsize,
     :cwy => context.ysize,
     :colx => context.colx,
@@ -106,20 +112,23 @@ function saveimage(layout::Union{TiledLayout, StackedLayout}, result::ColonyResu
     )
 
     # archive_image_db(db_filename(),colony_id,colonyFileName,seed,mask,filter,repeater)
-    @debug "Saved image file $file"
-    return file
+    @debug "Saved image file $filename"
+    return filename
 end
 
 
 function saveimage(layout::VideoLayout, result::ColonyResult, filedir::AbstractString)
-    context = result.context
     imgstack = result.img
+    repeats = result.repeats
+    context = result.context
+
     seed = context.seed
     mask = context.mask
     filter = context.filter
     layout = context.layout
 
     id = make_colony_id()
+    filedir = create_save_dir(filedir,(repeats ? "repeat" : "regular"),true)
     filename = make_filename(id, filedir, layout.ext)
 
     @debug "Attempting to save image of size $(size(imgstack)) to $(filename)"

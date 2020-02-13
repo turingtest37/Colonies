@@ -10,6 +10,8 @@ const swf = function changer(x::Int) return ((1-x),x); end
 # returns the same value as given
 const saf = function meme(x::Int) return (x,x); end
 
+const RNG = Random.RandomDevice()
+
 mutable struct FilterState
     s1::Any
     s2::Any
@@ -245,7 +247,7 @@ function generate_state_filters(isshuffled::Bool = false)
 
     neighbors = [i for i = 0:9]
     if isshuffled
-        Random.shuffle!(Random.RandomDevice(), neighbors)
+        Random.shuffle!(RNG, neighbors)
     end
     @debug "Neighbors begins its life as $(neighbors)"
 

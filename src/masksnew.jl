@@ -10,7 +10,7 @@ const MIRRH=@SMatrix [-1 0;0 1]
 const MIRRXY=@SMatrix [-0.5 0.5; 0.5 -0.5]
 const MIRRX_Y=@SMatrix [-0.5 -0.5;-0.5 -0.5]
 
-Random.seed!(2314)
+const RNG = Random.RandomDevice()
 
 mutable struct MaskIter{T,TT}
     i::T
@@ -31,7 +31,7 @@ function generate_coord_pairs(dim::Int = 5)
     matching_pairs = [Int[i,i] for i = -n:n]
     non_matching_pairs = collect(permutations(-n:n, 2))
     pairs = vcat(matching_pairs, non_matching_pairs)
-    shuffle(pairs)
+    shuffle!(RNG, pairs)
 end
 
 
